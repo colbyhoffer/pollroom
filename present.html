@@ -864,8 +864,10 @@
       $("stage-count").textContent = "";
       $("stage-progress").hidden = true;
       $("stage-join-foot").hidden = true;
-      if (lastStageKey !== "join") {
-        lastStageKey = "join";
+      const joinSess = sessionsList.find((sn) => sn.id === room.active_session_id);
+      const joinName = (joinSess && joinSess.name) || room.title || "PollRoom";
+      if (lastStageKey !== "join:" + joinName) {
+        lastStageKey = "join:" + joinName;
         const nPolls = sessionPolls().length;
         const content = $("stage-content");
         content._sig = null;
@@ -875,7 +877,7 @@
           '<div class="join-info">' +
           '<div class="lbl2">Join at</div>' +
           '<div class="url-big">' + esc(audienceUrl().replace(/^https?:\/\//, "")) + "</div>" +
-          '<div class="sess">' + esc(room.title || "PollRoom") + "</div>" +
+          '<div class="sess">' + esc(joinName) + "</div>" +
           '<div class="hint2">' + (nPolls ? nPolls + (nPolls === 1 ? " poll" : " polls") + " tonight · " : "") + "anonymous · no app needed</div>" +
           '<div class="joined-pill" id="stage-joined" hidden><span class="dot2"></span><span id="stage-joined-n"></span></div>' +
           "</div></div>";
