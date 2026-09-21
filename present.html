@@ -146,7 +146,7 @@
     display: flex; flex-direction: column; padding: 4vh 5vw;
   }
   #stage .head { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; }
-  #stage h1 { font-size: clamp(28px, 4.6vw, 58px); font-weight: 900; letter-spacing: -0.02em; margin: 0; max-width: 72vw; text-wrap: balance; }
+  #stage h1 { font-size: clamp(28px, 4.6vw, 58px); font-weight: 900; letter-spacing: -0.02em; margin: 0; max-width: min(72vw, calc(100vw - 340px)); text-wrap: balance; }
   #stage .content { flex: 1; display: flex; flex-direction: column; justify-content: center; padding-block: 3vh; min-height: 0; overflow: hidden; }
   #stage .bars { gap: 2.4vh; }
   #stage .bar-row .bar-label { font-size: clamp(16px, 2.2vw, 30px); margin-bottom: 0.8vh; }
@@ -158,6 +158,8 @@
   #stage .join .lbl { color: var(--muted); font-size: clamp(12px, 1.2vw, 16px); }
   #qr { background: #fff; padding: 8px; border-radius: 10px; line-height: 0; }
   #stage .count { color: var(--muted); font-size: clamp(14px, 1.6vw, 22px); font-variant-numeric: tabular-nums; }
+  #stage .stage-right { display: flex; flex-direction: column; align-items: flex-end; gap: 10px; }
+  #stage .stage-nav { display: flex; gap: 8px; }
   #stage .waiting-big { text-align: center; color: var(--muted); font-size: clamp(20px, 3vw, 40px); font-weight: 700; }
   #stage-exit { position: absolute; top: 14px; right: 16px; }
   #stage-reveal { position: absolute; top: 14px; right: 116px; }
@@ -169,7 +171,7 @@
   <div class="card">
     <h1>PollRoom Presenter</h1>
     <p>Enter the presenter passphrase to open the console.</p>
-    <input type="text" id="gate-pass" placeholder="Passphrase" autocomplete="off">
+    <input type="password" id="gate-pass" placeholder="Passphrase" autocomplete="current-password">
     <button class="btn" id="gate-btn" style="width:100%;margin-top:12px">Open console</button>
     <div class="err" id="gate-err" hidden></div>
     <p class="hint" id="gate-demo-hint" style="margin-top:12px" hidden>Demo mode: any passphrase works.</p>
@@ -256,7 +258,13 @@
       <div id="qr"></div>
       <div><div class="lbl">Join at</div><div class="url" id="stage-url"></div></div>
     </div>
-    <div class="count" id="stage-count"></div>
+    <div class="stage-right">
+      <div class="count" id="stage-count"></div>
+      <div class="stage-nav">
+        <button class="btn ghost sm" id="stage-prev" title="Previous poll (←)">◂ Prev</button>
+        <button class="btn sm" id="stage-next" title="Next poll (→)">Next ▸</button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -376,10 +384,18 @@
     renderResults(poll, counts, $("live-results"), $("live-n"), false);
   }
 
+  function respondentCount(poll, counts) {
+    if (poll.type === "open") return messages.filter((m) => m.poll_id === poll.id && !m.hidden).length;
+    return (counts && counts.respondents) || 0;
+  }
+
   function renderResults(poll, counts, el, nEl, stage) {
     if (!el) return;
     const c = counts || { votes: [], words: [], respondents: 0 };
-    if (nEl) nEl.textContent = c.respondents + (c.respondents === 1 ? " response" : " responses");
+    if (nEl) {
+      const n = respondentCount(poll, counts);
+      nEl.textContent = n + (n === 1 ? " response" : " responses");
+    }
     if (poll.type === "choice") {
       const byIdx = {};
       c.votes.forEach((v) => { byIdx[v.option_idx] = v.n; });
@@ -545,11 +561,29 @@
   $("stage-exit").addEventListener("click", exitStage);
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && staged) exitStage(); });
 
+  function stepPoll(dir) {
+    if (!polls.length) return Promise.resolve();
+    const idx = polls.findIndex((p) => p.id === (room && room.active_poll_id));
+    const to = idx === -1 ? (dir > 0 ? 0 : -1) : idx + dir;
+    if (to < 0 || to >= polls.length) return Promise.resolve();
+    return api.setActive(pass, polls[to].id);
+  }
+  $("stage-next").addEventListener("click", guard(() => stepPoll(1)));
+  $("stage-prev").addEventListener("click", guard(() => stepPoll(-1)));
+  document.addEventListener("keydown", (e) => {
+    if (!staged) return;
+    if (e.key === "ArrowRight") $("stage-next").click();
+    if (e.key === "ArrowLeft") $("stage-prev").click();
+  });
+
   function renderStage() {
     const poll = activePoll();
     const sr = $("stage-reveal");
     sr.hidden = !poll || poll.type !== "open";
     if (poll && poll.type === "open") sr.textContent = poll.revealed ? "Hide responses" : "Reveal responses";
+    const idx = polls.findIndex((p) => p.id === (room && room.active_poll_id));
+    $("stage-prev").disabled = idx <= 0;
+    $("stage-next").disabled = !polls.length || idx >= polls.length - 1;
     if (!poll) {
       $("stage-q").textContent = room.title || "PollRoom";
       $("stage-content").innerHTML = '<div class="waiting-big">Scan the code to join — first poll coming up.</div>';
@@ -558,7 +592,8 @@
     }
     $("stage-q").textContent = poll.title;
     renderResults(poll, counts, $("stage-content"), null, true);
-    $("stage-count").textContent = counts ? counts.respondents + (counts.respondents === 1 ? " response" : " responses") : "";
+    const n = respondentCount(poll, counts);
+    $("stage-count").textContent = n + (n === 1 ? " response" : " responses");
   }
 
   api.onChange(refresh);
