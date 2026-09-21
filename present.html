@@ -95,15 +95,21 @@
   .panel-h h2 { font-size: 12.5px; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); margin: 0; }
 
   .poll-item {
-    display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+    display: flex; align-items: center; gap: 10px;
     background: var(--card-2); border: 1.5px solid var(--line); color: var(--text);
     border-radius: 11px; padding: 11px 13px; margin-bottom: 8px;
   }
   .poll-item:hover { border-color: var(--muted); }
   .poll-item.selected { border-color: var(--accent); }
-  .poll-item .t { flex: 1; min-width: 0; }
-  .poll-item .t b { display: block; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .poll-item .t small { color: var(--muted); font-size: 12px; }
+  .pi-main {
+    flex: 1; min-width: 0; text-align: left; font: inherit; color: var(--text);
+    background: none; border: none; padding: 0; cursor: pointer;
+  }
+  .pi-main b { display: block; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pi-main small { color: var(--muted); font-size: 12px; }
+  .poll-item .golive { display: none; flex: none; }
+  .poll-item:hover .golive, .poll-item.selected .golive { display: inline-block; }
+  .poll-item:hover .tag.swap, .poll-item.selected .tag.swap { display: none; }
   .tag {
     flex: none; font-size: 10.5px; font-weight: 800; letter-spacing: 0.07em; text-transform: uppercase;
     padding: 3px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted);
@@ -164,6 +170,18 @@
   #stage .stage-right { display: flex; flex-direction: column; align-items: flex-end; gap: 10px; }
   #stage .stage-nav { display: flex; gap: 8px; }
   #stage .waiting-big { text-align: center; color: var(--muted); font-size: clamp(20px, 3vw, 40px); font-weight: 700; }
+  #stage .stage-progress { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+  #stage .stage-progress .dots { display: flex; gap: 9px; }
+  #stage .stage-progress .dots i { width: 10px; height: 10px; border-radius: 50%; background: #3a4557; }
+  #stage .stage-progress .dots i.on { background: var(--accent); }
+  #stage .stage-progress .plabel { font-size: clamp(12px, 1.3vw, 15px); font-weight: 600; color: var(--muted); }
+  #stage .join-big { display: flex; align-items: center; justify-content: center; gap: 5vw; flex-wrap: wrap; }
+  #stage .qr-card { background: #fff; border-radius: 18px; padding: 22px; line-height: 0; }
+  #stage .join-info { display: flex; flex-direction: column; gap: 12px; max-width: 46vw; min-width: 280px; }
+  #stage .join-info .lbl2 { font-size: clamp(13px, 1.3vw, 17px); font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
+  #stage .join-info .url-big { font-size: clamp(30px, 4.2vw, 54px); font-weight: 900; letter-spacing: -0.02em; color: var(--accent); overflow-wrap: break-word; }
+  #stage .join-info .sess { font-size: clamp(18px, 2vw, 26px); font-weight: 800; }
+  #stage .join-info .hint2 { font-size: clamp(14px, 1.4vw, 18px); color: var(--muted); }
   #stage-exit { position: absolute; top: 14px; right: 16px; }
   #stage-reveal { position: absolute; top: 14px; right: 116px; }
 </style>
@@ -266,10 +284,11 @@
   <div class="head"><h1 id="stage-q"></h1></div>
   <div class="content" id="stage-content"></div>
   <div class="foot">
-    <div class="join">
+    <div class="join" id="stage-join-foot">
       <div id="qr"></div>
       <div><div class="lbl">Join at</div><div class="url" id="stage-url"></div></div>
     </div>
+    <div class="stage-progress" id="stage-progress" hidden></div>
     <div class="stage-right">
       <div class="count" id="stage-count"></div>
       <div class="stage-nav">
@@ -292,7 +311,7 @@
 
   let pass = null;
   try { pass = sessionStorage.getItem("pr_pass"); } catch (e) {}
-  let room = null, polls = [], counts = null, messages = [], sessionsList = [];
+  let room = null, polls = [], counts = null, messages = [], sessionsList = [], respMap = {};
   let editing = null;          // poll object being edited, or {id:null,...}
   let selectedId = null;
   let staged = false;
@@ -325,8 +344,8 @@
   async function refresh() {
     if (!pass) return;
     try {
-      const [r, p, m, sl] = await Promise.all([api.getRoom(), api.getPolls(), api.getMessages(), api.getSessions()]);
-      room = r; polls = p; messages = m; sessionsList = sl;
+      const [r, p, m, sl, rc] = await Promise.all([api.getRoom(), api.getPolls(), api.getMessages(), api.getSessions(), api.getAllRespondentCounts()]);
+      room = r; polls = p; messages = m; sessionsList = sl; respMap = rc;
       const active = activePoll();
       counts = active ? await api.getCounts(active.id) : null;
       render();
@@ -358,15 +377,26 @@
     $("poll-list").innerHTML = sessionPolls().map((p) => {
       const live = room.active_poll_id === p.id;
       const kind = { choice: "Multiple choice", words: "Word cloud", open: "Open response" }[p.type];
+      const n = p.type === "open"
+        ? messages.filter((m) => m.poll_id === p.id && !m.hidden).length
+        : (respMap[p.id] || 0);
+      const meta = kind + " · " + (n ? n + (n === 1 ? " response" : " responses") : "no responses yet");
+      const side = live
+        ? '<span class="tag live">Live</span>'
+        : '<span class="tag swap">' + (n ? "Done" : "Ready") + '</span>' +
+          '<button class="btn sm golive" data-go="' + p.id + '">Go live ▸</button>';
       return (
-        '<button class="poll-item' + (selectedId === p.id ? " selected" : "") + '" data-id="' + p.id + '">' +
-        '<div class="t"><b>' + esc(p.title) + "</b><small>" + kind + "</small></div>" +
-        (live ? '<span class="tag live">Live</span>' : '<span class="tag">Ready</span>') +
-        "</button>"
+        '<div class="poll-item' + (selectedId === p.id ? " selected" : "") + '">' +
+        '<button class="pi-main" data-id="' + p.id + '"><b>' + esc(p.title) + "</b><small>" + meta + "</small></button>" +
+        side +
+        "</div>"
       );
     }).join("") || '<div class="hint">No polls in this session yet — create one.</div>';
-    document.querySelectorAll(".poll-item").forEach((el) => {
+    document.querySelectorAll(".pi-main").forEach((el) => {
       el.addEventListener("click", () => { selectedId = el.dataset.id; openEditor(polls.find((p) => p.id === selectedId)); render(); });
+    });
+    document.querySelectorAll(".golive").forEach((el) => {
+      el.addEventListener("click", guard(() => api.setActive(pass, el.dataset.go)));
     });
 
     renderLive();
@@ -702,10 +732,39 @@
     $("stage-prev").disabled = idx <= 0;
     $("stage-next").disabled = !navList.length || idx >= navList.length - 1;
     if (!poll) {
-      $("stage-q").textContent = room.title || "PollRoom";
-      $("stage-content").innerHTML = '<div class="waiting-big">Scan the code to join — first poll coming up.</div>';
+      $("stage-q").textContent = "";
       $("stage-count").textContent = "";
+      $("stage-progress").hidden = true;
+      $("stage-join-foot").hidden = true;
+      if (lastStageKey !== "join") {
+        lastStageKey = "join";
+        const nPolls = sessionPolls().length;
+        const content = $("stage-content");
+        content._sig = null;
+        content.innerHTML =
+          '<div class="join-big">' +
+          '<div class="qr-card"><div id="stage-qr-big"></div></div>' +
+          '<div class="join-info">' +
+          '<div class="lbl2">Join at</div>' +
+          '<div class="url-big">' + esc(audienceUrl().replace(/^https?:\/\//, "")) + "</div>" +
+          '<div class="sess">' + esc(room.title || "PollRoom") + "</div>" +
+          '<div class="hint2">' + (nPolls ? nPolls + (nPolls === 1 ? " poll" : " polls") + " tonight · " : "") + "anonymous · no app needed</div>" +
+          "</div></div>";
+        if (window.QRCode) new QRCode($("stage-qr-big"), { text: audienceUrl(), width: 300, height: 300, colorDark: "#10141b", colorLight: "#ffffff" });
+      }
       return;
+    }
+    $("stage-join-foot").hidden = false;
+    const navList2 = sessionPolls();
+    const pi = navList2.findIndex((p2) => p2.id === poll.id);
+    const prog = $("stage-progress");
+    prog.hidden = pi < 0 || navList2.length < 2;
+    if (!prog.hidden) {
+      prog.innerHTML =
+        (navList2.length <= 10
+          ? '<div class="dots">' + navList2.map((_, i) => '<i class="' + (i === pi ? "on" : "") + '"></i>').join("") + "</div>"
+          : "") +
+        '<div class="plabel">Poll ' + (pi + 1) + " of " + navList2.length + "</div>";
     }
     $("stage-q").textContent = poll.title;
     const stageKey = poll.id + ":" + !!poll.revealed;

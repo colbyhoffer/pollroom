@@ -163,6 +163,13 @@
       if (error) fail(error);
       return data;
     };
+    api.getAllRespondentCounts = async () => {
+      const { data, error } = await sb.from("respondent_counts").select("*");
+      if (error) fail(error);
+      const map = {};
+      (data || []).forEach((r) => { map[r.poll_id] = (map[r.poll_id] || 0) + r.n; });
+      return map;
+    };
     api.getCounts = async (pollId) => {
       const [vc, wc, rc] = await Promise.all([
         sb.from("vote_counts").select("*").eq("poll_id", pollId),
@@ -208,6 +215,16 @@
     api.getRoom = async () => demoLoad().room;
     api.getPolls = async () => demoLoad().polls.slice().sort((a, b) => a.position - b.position);
     api.getSessions = async () => demoLoad().sessions.slice().sort((a, b) => (a.created_at < b.created_at ? -1 : 1));
+    api.getAllRespondentCounts = async () => {
+      const s = demoLoad();
+      const map = {};
+      [s.votes, s.words].forEach((arr) => {
+        const seen = {};
+        arr.forEach((x) => { (seen[x.poll_id] = seen[x.poll_id] || new Set()).add(x.device_id); });
+        Object.entries(seen).forEach(([k, v]) => { map[k] = (map[k] || 0) + v.size; });
+      });
+      return map;
+    };
     api.getCounts = async (pollId) => {
       const s = demoLoad();
       const votes = {};
