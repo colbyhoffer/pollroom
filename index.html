@@ -144,6 +144,9 @@
     margin: 26px 0 10px;
   }
   .section-h h2 { font-size: 13px; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); margin: 0; }
+  @keyframes msg-in { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
+  .msg.anim { animation: msg-in 0.5s cubic-bezier(0.22, 1, 0.36, 1) both; }
+  @media (prefers-reduced-motion: reduce) { .msg.anim { animation: none; } }
   .msg { display: flex; gap: 12px; padding: 13px 2px; border-bottom: 1px solid var(--line); }
   .msg:last-child { border-bottom: none; }
   .msg .body { flex: 1; min-width: 0; overflow-wrap: break-word; }
@@ -430,7 +433,8 @@
   function renderOpenPoll(poll, area) {
     const lim = poll.max_upvotes == null ? 3 : poll.max_upvotes;
     const mode = "open:" + poll.id + ":" + (poll.revealed ? "r" : "h");
-    if (renderedMode !== mode || renderedPollId !== poll.id) {
+    const rebuilt = renderedMode !== mode || renderedPollId !== poll.id;
+    if (rebuilt) {
       renderedMode = mode; renderedPollId = poll.id;
       area.innerHTML =
         '<div class="card">' +
@@ -453,7 +457,7 @@
     const note = $("open-note");
     if (poll.revealed) {
       note.hidden = true;
-      renderFeed($("open-feed"), all, { errId: "open-err" });
+      renderFeed($("open-feed"), all, { errId: "open-err", animate: rebuilt });
     } else {
       const mine = new Set(myMsgs[poll.id] || []);
       const own = all.filter((m) => mine.has(m.id));
@@ -483,15 +487,21 @@
     if (!el) return;
     opts = opts || {};
     const showUps = opts.upvotes !== false;
-    const focused = document.activeElement;
-    el.innerHTML = list.map((m) =>
-      '<div class="msg">' +
+    const row = (m, anim, i) =>
+      '<div class="msg' + (anim ? " anim" : "") + '"' +
+      (anim ? ' style="animation-delay:' + Math.min(i, 20) * 70 + 'ms"' : "") + ">" +
       '<div class="body">' + esc(m.body) + '<div class="time">' + timeAgo(m.created_at) + "</div></div>" +
       (showUps
         ? '<button class="upvote' + (myUps[m.id] ? " on" : "") + '" data-id="' + m.id + '" aria-label="Upvote">▲<span>' + m.upvotes + "</span></button>"
         : "") +
-      "</div>"
-    ).join("") || (opts.empty != null ? opts.empty : '<div class="hint" style="padding-block:8px">Nothing yet — start the conversation.</div>');
+      "</div>";
+    const empty = opts.empty != null ? opts.empty : '<div class="hint" style="padding-block:8px">Nothing yet — start the conversation.</div>';
+    // Skip identical re-renders so in-flight reveal animations aren't wiped
+    const sig = list.map((m) => row(m, false, 0)).join("") || empty;
+    if (!opts.animate && el._sig === sig) return;
+    el._sig = sig;
+    const focused = document.activeElement;
+    el.innerHTML = opts.animate ? (list.map((m, i) => row(m, true, i)).join("") || empty) : sig;
     el.querySelectorAll(".upvote").forEach((btn) => {
       btn.addEventListener("click", async () => {
         try {

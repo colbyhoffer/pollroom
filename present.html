@@ -128,6 +128,9 @@
   .cloud { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: baseline; justify-content: center; padding: 12px 0; }
   .cloud span { font-weight: 800; line-height: 1.1; }
 
+  @keyframes msg-in { from { opacity: 0; transform: translateY(18px); } to { opacity: 1; transform: none; } }
+  .msg.anim { animation: msg-in 0.55s cubic-bezier(0.22, 1, 0.36, 1) both; }
+  @media (prefers-reduced-motion: reduce) { .msg.anim { animation: none; } }
   .msg { display: flex; gap: 10px; align-items: flex-start; padding: 10px 2px; border-bottom: 1px solid var(--line); }
   .msg:last-child { border-bottom: none; }
   .msg .body { flex: 1; min-width: 0; overflow-wrap: break-word; }
@@ -365,6 +368,7 @@
     }
     const body = $("live-body");
     if (!poll) {
+      lastLiveKey = null;
       const sel = polls.find((p) => p.id === selectedId);
       body.innerHTML =
         '<div class="hint" style="padding-block:6px">Nothing is live. ' +
@@ -375,22 +379,30 @@
       if (b) b.addEventListener("click", guard(() => api.setActive(pass, sel.id)));
       return;
     }
-    body.innerHTML =
-      '<p style="font-size:18px;font-weight:800;margin:0 0 12px">' + esc(poll.title) + "</p>" +
-      (poll.type === "open" && !poll.revealed
-        ? '<p class="hint" style="margin:-6px 0 12px">Only you can see these — hidden from the audience until you reveal.</p>'
-        : "") +
-      '<div id="live-results"></div>' +
-      '<div class="respondents" id="live-n"></div>';
-    renderResults(poll, counts, $("live-results"), $("live-n"), false);
+    // Rebuild the panel shell only when the poll or reveal state changes, so
+    // in-flight reveal animations inside it aren't wiped by routine refreshes.
+    const liveKey = poll.id + ":" + !!poll.revealed + ":" + poll.title;
+    const animate = poll.type === "open" && poll.revealed && liveKey !== lastLiveKey && lastLiveKey !== null;
+    if (liveKey !== lastLiveKey) {
+      lastLiveKey = liveKey;
+      body.innerHTML =
+        '<p style="font-size:18px;font-weight:800;margin:0 0 12px">' + esc(poll.title) + "</p>" +
+        (poll.type === "open" && !poll.revealed
+          ? '<p class="hint" style="margin:-6px 0 12px">Only you can see these — hidden from the audience until you reveal.</p>'
+          : "") +
+        '<div id="live-results"></div>' +
+        '<div class="respondents" id="live-n"></div>';
+    }
+    renderResults(poll, counts, $("live-results"), $("live-n"), false, animate);
   }
+  let lastLiveKey = null;
 
   function respondentCount(poll, counts) {
     if (poll.type === "open") return messages.filter((m) => m.poll_id === poll.id && !m.hidden).length;
     return (counts && counts.respondents) || 0;
   }
 
-  function renderResults(poll, counts, el, nEl, stage) {
+  function renderResults(poll, counts, el, nEl, stage, animate) {
     if (!el) return;
     const c = counts || { votes: [], words: [], respondents: 0 };
     if (nEl) {
@@ -424,14 +436,21 @@
         .sort((a, b) => b.upvotes - a.upvotes).slice(0, stage ? 8 : 30);
       if (stage && !poll.revealed) {
         const n = messages.filter((m) => m.poll_id === poll.id && !m.hidden).length;
+        el._sig = null;
         el.innerHTML = '<div class="waiting-big">' + n + (n === 1 ? " response" : " responses") +
           " locked in — answer on your phone.</div>";
         return;
       }
-      el.innerHTML = list.map((m) =>
-        '<div class="msg"><div class="body"' + (stage ? ' style="font-size:clamp(16px,2vw,28px);font-weight:600"' : "") + ">" + esc(m.body) + "</div>" +
-        '<div class="meta">▲ ' + m.upvotes + "</div></div>"
-      ).join("") || '<div class="hint">Waiting for responses…</div>';
+      const row = (m, anim, i) =>
+        '<div class="msg' + (anim ? " anim" : "") + '"' +
+        (anim ? ' style="animation-delay:' + i * (stage ? 130 : 70) + 'ms"' : "") + ">" +
+        '<div class="body"' + (stage ? ' style="font-size:clamp(16px,2vw,28px);font-weight:600"' : "") + ">" + esc(m.body) + "</div>" +
+        '<div class="meta">▲ ' + m.upvotes + "</div></div>";
+      // Skip identical re-renders so the reveal cascade isn't wiped mid-flight
+      const sig = list.map((m) => row(m, false, 0)).join("") || '<div class="hint">Waiting for responses…</div>';
+      if (!animate && el._sig === sig) return;
+      el._sig = sig;
+      el.innerHTML = animate ? (list.map((m, i) => row(m, true, i)).join("") || sig) : sig;
     }
   }
 
@@ -590,7 +609,7 @@
   }));
 
   // ---------- big screen ----------
-  let qr = null;
+  let qr = null, lastStageKey = null;
   $("present-btn").addEventListener("click", () => {
     staged = true;
     $("stage").hidden = false;
@@ -639,7 +658,10 @@
       return;
     }
     $("stage-q").textContent = poll.title;
-    renderResults(poll, counts, $("stage-content"), null, true);
+    const stageKey = poll.id + ":" + !!poll.revealed;
+    const animate = poll.type === "open" && poll.revealed && stageKey !== lastStageKey;
+    lastStageKey = stageKey;
+    renderResults(poll, counts, $("stage-content"), null, true, animate);
     const n = respondentCount(poll, counts);
     $("stage-count").textContent = n + (n === 1 ? " response" : " responses");
   }
