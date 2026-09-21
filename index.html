@@ -207,6 +207,7 @@
   let myVotes = lsGet("pr_my_votes", {});     // pollId -> [option_idx]
   let myWords = lsGet("pr_my_words", {});     // pollId -> [words]
   let myUps = lsGet("pr_my_upvotes", {});     // messageId -> true
+  let myMsgs = lsGet("pr_my_msgs", {});       // pollId -> [messageId] (to show own responses pre-reveal)
 
   // ------- state -------
   let room = null, polls = [], counts = null, messages = [];
@@ -425,26 +426,44 @@
     }
   }
 
-  // --- open poll: responses + upvotes ---
+  // --- open poll: responses + upvotes (hidden until presenter reveals) ---
   function renderOpenPoll(poll, area) {
-    const mode = "open:" + poll.id;
+    const lim = poll.max_upvotes == null ? 3 : poll.max_upvotes;
+    const mode = "open:" + poll.id + ":" + (poll.revealed ? "r" : "h");
     if (renderedMode !== mode || renderedPollId !== poll.id) {
       renderedMode = mode; renderedPollId = poll.id;
       area.innerHTML =
         '<div class="card">' +
         '<p class="poll-q">' + esc(poll.title) + "</p>" +
-        '<p class="poll-meta">Reply below · tap ▲ to boost answers you like</p>' +
+        '<p class="poll-meta">' + (poll.revealed
+          ? "Tap ▲ to boost answers you like" + (lim > 0 ? " (up to " + lim + ")" : "")
+          : "Reply below — responses stay hidden until the presenter reveals them") + "</p>" +
         '<div class="composer">' +
         '<input type="text" id="open-input" maxlength="280" placeholder="Type your response…">' +
         '<button class="btn" id="open-send">Send</button>' +
         "</div>" +
         '<div class="err" id="open-err" hidden></div>' +
+        '<div class="hint" id="open-note" style="padding-block:8px" hidden></div>' +
         '<div id="open-feed"></div>' +
         "</div>";
       $("open-send").addEventListener("click", () => submitMessage("open-input", "open-err", poll.id));
       $("open-input").addEventListener("keydown", (e) => { if (e.key === "Enter") $("open-send").click(); });
     }
-    renderFeed($("open-feed"), messages.filter((m) => m.poll_id === poll.id && !m.hidden));
+    const all = messages.filter((m) => m.poll_id === poll.id && !m.hidden);
+    const note = $("open-note");
+    if (poll.revealed) {
+      note.hidden = true;
+      renderFeed($("open-feed"), all, { errId: "open-err" });
+    } else {
+      const mine = new Set(myMsgs[poll.id] || []);
+      const own = all.filter((m) => mine.has(m.id));
+      note.hidden = false;
+      note.textContent = all.length
+        ? all.length + (all.length === 1 ? " response is" : " responses are") + " in, waiting for the reveal." +
+          (own.length ? " Yours " + (own.length === 1 ? "is" : "are") + " below." : "")
+        : "No responses yet — yours can be first.";
+      renderFeed($("open-feed"), own, { upvotes: false, empty: "" });
+    }
   }
 
   // ------- room chat -------
@@ -457,26 +476,34 @@
     $("chat-input").disabled = !open;
     $("chat-send").disabled = !open;
     $("chat-input").placeholder = open ? "Say something to the room…" : "Chat is closed right now";
-    renderFeed($("chat-feed"), roomMsgs);
+    renderFeed($("chat-feed"), roomMsgs, { errId: "chat-err" });
   }
 
-  function renderFeed(el, list) {
+  function renderFeed(el, list, opts) {
     if (!el) return;
+    opts = opts || {};
+    const showUps = opts.upvotes !== false;
     const focused = document.activeElement;
     el.innerHTML = list.map((m) =>
       '<div class="msg">' +
       '<div class="body">' + esc(m.body) + '<div class="time">' + timeAgo(m.created_at) + "</div></div>" +
-      '<button class="upvote' + (myUps[m.id] ? " on" : "") + '" data-id="' + m.id + '" aria-label="Upvote">▲<span>' + m.upvotes + "</span></button>" +
+      (showUps
+        ? '<button class="upvote' + (myUps[m.id] ? " on" : "") + '" data-id="' + m.id + '" aria-label="Upvote">▲<span>' + m.upvotes + "</span></button>"
+        : "") +
       "</div>"
-    ).join("") || '<div class="hint" style="padding-block:8px">Nothing yet — start the conversation.</div>';
+    ).join("") || (opts.empty != null ? opts.empty : '<div class="hint" style="padding-block:8px">Nothing yet — start the conversation.</div>');
     el.querySelectorAll(".upvote").forEach((btn) => {
       btn.addEventListener("click", async () => {
         try {
           const on = await api.toggleUpvote(btn.dataset.id);
           if (on) myUps[btn.dataset.id] = true; else delete myUps[btn.dataset.id];
           lsSet("pr_my_upvotes", myUps);
+          if (opts.errId) $(opts.errId).hidden = true;
           refresh();
-        } catch (e) { console.error(e); }
+        } catch (e) {
+          if (opts.errId) { const errEl = $(opts.errId); errEl.hidden = false; errEl.textContent = e.message; }
+          else console.error(e);
+        }
       });
     });
     if (focused && focused.id) { const again = $(focused.id); if (again) again.focus(); }
@@ -488,7 +515,11 @@
     if (!body) return;
     err.hidden = true;
     try {
-      await api.postMessage(body, pollId);
+      const id = await api.postMessage(body, pollId);
+      if (pollId && id) {
+        myMsgs[pollId] = (myMsgs[pollId] || []).concat(id);
+        lsSet("pr_my_msgs", myMsgs);
+      }
       input.value = "";
       refresh();
     } catch (e) {

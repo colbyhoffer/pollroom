@@ -63,7 +63,7 @@
       polls: [
         { id: p1, title: "How are you feeling about tonight?", type: "choice", options: ["Fired up", "Curious", "Nervous", "Just here for the tacos"], allow_multiple: false, position: 0 },
         { id: p2, title: "One word to describe this semester", type: "words", options: [], allow_multiple: false, position: 1 },
-        { id: p3, title: "What should we ask the panel?", type: "open", options: [], allow_multiple: false, position: 2 },
+        { id: p3, title: "What should we ask the panel?", type: "open", options: [], allow_multiple: false, revealed: false, max_upvotes: 3, position: 2 },
       ],
       votes,
       words,
@@ -172,10 +172,11 @@
     };
     api.castVote = async (pollId, options) => { await rpc("cast_vote", { _poll: pollId, _device: deviceId, _options: options }); ping(); };
     api.submitWords = async (pollId, words) => { await rpc("submit_words", { _poll: pollId, _device: deviceId, _words: words }); ping(); };
-    api.postMessage = async (body, pollId) => { await rpc("post_message", { _device: deviceId, _body: body, _poll: pollId || null }); ping(); };
+    api.postMessage = async (body, pollId) => { const id = await rpc("post_message", { _device: deviceId, _body: body, _poll: pollId || null }); ping(); return id; };
     api.toggleUpvote = async (messageId) => { const r = await rpc("toggle_upvote", { _message: messageId, _device: deviceId }); ping(); return r; };
     api.checkPass = async (pass) => rpc("check_admin", { _pass: pass });
-    api.savePoll = async (pass, p) => { const id = await rpc("admin_save_poll", { _pass: pass, _id: p.id || null, _title: p.title, _type: p.type, _options: p.options || [], _allow_multiple: !!p.allow_multiple }); ping(); return id; };
+    api.savePoll = async (pass, p) => { const id = await rpc("admin_save_poll", { _pass: pass, _id: p.id || null, _title: p.title, _type: p.type, _options: p.options || [], _allow_multiple: !!p.allow_multiple, _max_upvotes: p.max_upvotes == null ? 3 : p.max_upvotes }); ping(); return id; };
+    api.setRevealed = async (pass, id, revealed) => { await rpc("admin_set_revealed", { _pass: pass, _id: id, _revealed: revealed }); ping(); };
     api.deletePoll = async (pass, id) => { await rpc("admin_delete_poll", { _pass: pass, _id: id }); ping(); };
     api.setActive = async (pass, id) => { await rpc("admin_set_active", { _pass: pass, _poll: id }); ping(); };
     api.setRoom = async (pass, { title, comments_open }) => { await rpc("admin_set_room", { _pass: pass, _title: title ?? null, _comments_open: comments_open ?? null }); ping(); };
@@ -230,15 +231,30 @@
       if (!b || b.length > 280) throw new Error("message must be 1-280 characters");
       if (!pollId && !s.room.comments_open) throw new Error("comments are closed");
       if (pollId) activeGuard(s, pollId);
-      s.messages.push({ id: uuid(), poll_id: pollId || null, device_id: deviceId, body: b, hidden: false, created_at: new Date().toISOString() });
+      const id = uuid();
+      s.messages.push({ id, poll_id: pollId || null, device_id: deviceId, body: b, hidden: false, created_at: new Date().toISOString() });
       demoSave(s);
+      return id;
     };
     api.toggleUpvote = async (messageId) => {
       const s = demoLoad();
       const before = s.upvotes.length;
       s.upvotes = s.upvotes.filter((u) => !(u.message_id === messageId && u.device_id === deviceId));
       let nowUp = false;
-      if (s.upvotes.length === before) { s.upvotes.push({ message_id: messageId, device_id: deviceId }); nowUp = true; }
+      if (s.upvotes.length === before) {
+        const msg = s.messages.find((m) => m.id === messageId);
+        if (msg && msg.poll_id) {
+          const poll = s.polls.find((p) => p.id === msg.poll_id);
+          const lim = poll ? (poll.max_upvotes == null ? 3 : poll.max_upvotes) : 0;
+          if (lim > 0) {
+            const pollMsgIds = new Set(s.messages.filter((m) => m.poll_id === msg.poll_id).map((m) => m.id));
+            const used = s.upvotes.filter((u) => u.device_id === deviceId && pollMsgIds.has(u.message_id)).length;
+            if (used >= lim) throw new Error("you can only boost " + lim + (lim === 1 ? " response" : " responses") + " on this poll");
+          }
+        }
+        s.upvotes.push({ message_id: messageId, device_id: deviceId });
+        nowUp = true;
+      }
       demoSave(s);
       return nowUp;
     };
@@ -247,16 +263,23 @@
       const s = demoLoad();
       if (!p.title || !p.title.trim()) throw new Error("title required");
       if (p.type === "choice" && (p.options || []).length < 2) throw new Error("choice polls need at least 2 options");
+      const lim = Math.max(p.max_upvotes == null ? 3 : p.max_upvotes, 0);
       if (p.id) {
         const ex = s.polls.find((x) => x.id === p.id);
-        Object.assign(ex, { title: p.title.trim(), type: p.type, options: p.options || [], allow_multiple: !!p.allow_multiple });
+        Object.assign(ex, { title: p.title.trim(), type: p.type, options: p.options || [], allow_multiple: !!p.allow_multiple, max_upvotes: lim });
         demoSave(s);
         return p.id;
       }
       const id = uuid();
-      s.polls.push({ id, title: p.title.trim(), type: p.type, options: p.options || [], allow_multiple: !!p.allow_multiple, position: s.polls.length });
+      s.polls.push({ id, title: p.title.trim(), type: p.type, options: p.options || [], allow_multiple: !!p.allow_multiple, revealed: false, max_upvotes: lim, position: s.polls.length });
       demoSave(s);
       return id;
+    };
+    api.setRevealed = async (_pass, id, revealed) => {
+      const s = demoLoad();
+      const p = s.polls.find((x) => x.id === id);
+      if (p) p.revealed = revealed;
+      demoSave(s);
     };
     api.deletePoll = async (_pass, id) => {
       const s = demoLoad();

@@ -160,6 +160,7 @@
   #stage .count { color: var(--muted); font-size: clamp(14px, 1.6vw, 22px); font-variant-numeric: tabular-nums; }
   #stage .waiting-big { text-align: center; color: var(--muted); font-size: clamp(20px, 3vw, 40px); font-weight: 700; }
   #stage-exit { position: absolute; top: 14px; right: 16px; }
+  #stage-reveal { position: absolute; top: 14px; right: 116px; }
 </style>
 </head>
 <body>
@@ -213,6 +214,10 @@
           <button class="btn ghost sm" id="ed-add-opt">+ Add option</button>
           <label class="toggle" style="margin-top:10px"><span class="switch"><input type="checkbox" id="ed-multi"><i></i></span> Allow multiple selections</label>
         </div>
+        <div class="field" id="ed-upvotes-field" hidden><label for="ed-upvotes">Upvotes per person</label>
+          <input type="text" id="ed-upvotes" inputmode="numeric" style="max-width:120px" placeholder="3">
+          <p class="hint" style="margin:6px 0 0">How many responses each person can boost · 0 = no limit</p>
+        </div>
         <div class="row">
           <button class="btn" id="ed-save">Save poll</button>
           <button class="btn ghost" id="ed-cancel">Cancel</button>
@@ -225,6 +230,7 @@
       <div class="card" id="live-panel" style="margin-bottom:16px">
         <div class="panel-h"><h2>On screen now</h2>
           <div class="row">
+            <button class="btn sm" id="reveal-btn" hidden>Reveal responses</button>
             <button class="btn ghost sm" id="reset-btn" hidden>Reset responses</button>
             <button class="btn ghost sm" id="end-btn" hidden>End poll</button>
           </div>
@@ -242,6 +248,7 @@
 
 <div id="stage" hidden>
   <button class="btn ghost sm" id="stage-exit">Exit (Esc)</button>
+  <button class="btn sm" id="stage-reveal" hidden>Reveal responses</button>
   <div class="head"><h1 id="stage-q"></h1></div>
   <div class="content" id="stage-content"></div>
   <div class="foot">
@@ -343,6 +350,10 @@
     const poll = activePoll();
     $("end-btn").hidden = !poll;
     $("reset-btn").hidden = !poll;
+    $("reveal-btn").hidden = !poll || poll.type !== "open";
+    if (poll && poll.type === "open") {
+      $("reveal-btn").textContent = poll.revealed ? "Hide responses" : "Reveal responses";
+    }
     const body = $("live-body");
     if (!poll) {
       const sel = polls.find((p) => p.id === selectedId);
@@ -357,6 +368,9 @@
     }
     body.innerHTML =
       '<p style="font-size:18px;font-weight:800;margin:0 0 12px">' + esc(poll.title) + "</p>" +
+      (poll.type === "open" && !poll.revealed
+        ? '<p class="hint" style="margin:-6px 0 12px">Only you can see these — hidden from the audience until you reveal.</p>'
+        : "") +
       '<div id="live-results"></div>' +
       '<div class="respondents" id="live-n"></div>';
     renderResults(poll, counts, $("live-results"), $("live-n"), false);
@@ -391,12 +405,25 @@
     } else {
       const list = messages.filter((m) => m.poll_id === poll.id && !m.hidden)
         .sort((a, b) => b.upvotes - a.upvotes).slice(0, stage ? 8 : 30);
+      if (stage && !poll.revealed) {
+        const n = messages.filter((m) => m.poll_id === poll.id && !m.hidden).length;
+        el.innerHTML = '<div class="waiting-big">' + n + (n === 1 ? " response" : " responses") +
+          " locked in — answer on your phone.</div>";
+        return;
+      }
       el.innerHTML = list.map((m) =>
         '<div class="msg"><div class="body"' + (stage ? ' style="font-size:clamp(16px,2vw,28px);font-weight:600"' : "") + ">" + esc(m.body) + "</div>" +
         '<div class="meta">▲ ' + m.upvotes + "</div></div>"
       ).join("") || '<div class="hint">Waiting for responses…</div>';
     }
   }
+
+  const toggleReveal = guard(() => {
+    const p = activePoll();
+    return p && p.type === "open" ? api.setRevealed(pass, p.id, !p.revealed) : Promise.resolve();
+  });
+  $("reveal-btn").addEventListener("click", toggleReveal);
+  $("stage-reveal").addEventListener("click", toggleReveal);
 
   $("end-btn").addEventListener("click", guard(() => api.setActive(pass, null)));
   $("reset-btn").addEventListener("click", guard(() => {
@@ -448,6 +475,7 @@
     $("ed-title").value = editing.title;
     $("ed-type").value = editing.type;
     $("ed-multi").checked = !!editing.allow_multiple;
+    $("ed-upvotes").value = editing.max_upvotes == null ? "" : String(editing.max_upvotes);
     renderOptionInputs();
     typeChanged();
     $("ed-err").hidden = true;
@@ -464,18 +492,23 @@
       b.addEventListener("click", () => { editing.options.splice(+b.dataset.del, 1); renderOptionInputs(); });
     });
   }
-  function typeChanged() { $("ed-options-field").hidden = $("ed-type").value !== "choice"; }
+  function typeChanged() {
+    $("ed-options-field").hidden = $("ed-type").value !== "choice";
+    $("ed-upvotes-field").hidden = $("ed-type").value !== "open";
+  }
   $("ed-type").addEventListener("change", typeChanged);
   $("ed-add-opt").addEventListener("click", () => { editing.options.push(""); renderOptionInputs(); });
   $("new-poll").addEventListener("click", () => { selectedId = null; openEditor(null); });
   $("ed-cancel").addEventListener("click", () => { $("editor").hidden = true; });
   $("ed-save").addEventListener("click", async () => {
+    const upRaw = $("ed-upvotes").value.trim();
     const p = {
       id: editing.id,
       title: $("ed-title").value,
       type: $("ed-type").value,
       options: $("ed-type").value === "choice" ? editing.options.map((o) => o.trim()).filter(Boolean) : [],
       allow_multiple: $("ed-multi").checked,
+      max_upvotes: upRaw === "" ? 3 : Math.max(parseInt(upRaw, 10) || 0, 0),
     };
     try {
       const id = await api.savePoll(pass, p);
@@ -514,6 +547,9 @@
 
   function renderStage() {
     const poll = activePoll();
+    const sr = $("stage-reveal");
+    sr.hidden = !poll || poll.type !== "open";
+    if (poll && poll.type === "open") sr.textContent = poll.revealed ? "Hide responses" : "Reveal responses";
     if (!poll) {
       $("stage-q").textContent = room.title || "PollRoom";
       $("stage-content").innerHTML = '<div class="waiting-big">Scan the code to join — first poll coming up.</div>';
