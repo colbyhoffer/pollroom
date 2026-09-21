@@ -1,0 +1,531 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>PollRoom Presenter</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;800;900&display=swap">
+<style>
+  :root {
+    --bg: #10141b;
+    --card: #1a212c;
+    --card-2: #212a37;
+    --line: #2c3646;
+    --text: #edf1f7;
+    --muted: #8b96a5;
+    --accent: #ff7a2e;
+    --accent-soft: rgba(255, 122, 46, 0.14);
+    --danger: #e05b5b;
+    --radius: 14px;
+    --font: "Archivo", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--bg); color: var(--text); font-family: var(--font);
+    font-size: 15px; line-height: 1.45;
+    padding-inline: 16px;
+    padding-block: env(safe-area-inset-top, 0px) calc(env(safe-area-inset-bottom, 0px) + 24px);
+  }
+  button { font: inherit; cursor: pointer; }
+  input[type=text], select, textarea {
+    font: inherit; color: var(--text); background: var(--card-2);
+    border: 1.5px solid var(--line); border-radius: 10px; padding: 10px 12px; width: 100%;
+  }
+  ::placeholder { color: var(--muted); }
+  button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .btn {
+    font-weight: 800; background: var(--accent); color: #17110c; border: none;
+    border-radius: 10px; padding: 10px 18px; transition: filter 0.12s;
+  }
+  .btn:hover { filter: brightness(1.08); }
+  .btn:disabled { opacity: 0.45; cursor: default; }
+  .btn.ghost { background: transparent; color: var(--text); border: 1.5px solid var(--line); font-weight: 600; }
+  .btn.ghost:hover { border-color: var(--muted); }
+  .btn.danger { background: transparent; color: var(--danger); border: 1.5px solid var(--danger); font-weight: 600; }
+  .btn.sm { padding: 7px 13px; font-size: 13.5px; border-radius: 9px; }
+
+  /* ---- gate ---- */
+  #gate {
+    position: fixed; inset: 0; background: var(--bg); z-index: 50;
+    display: grid; place-items: center; padding: 16px;
+  }
+  #gate .card { width: 100%; max-width: 380px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 20px; }
+  #gate h1 { font-size: 24px; font-weight: 900; letter-spacing: -0.02em; margin: 0 0 4px; }
+  #gate p { color: var(--muted); margin: 0 0 16px; font-size: 14px; }
+  .err { color: #ff8c7a; font-size: 13.5px; margin-top: 10px; }
+  .hint { color: var(--muted); font-size: 12.5px; }
+
+  /* ---- app layout ---- */
+  #app { max-width: 1180px; margin: 0 auto; }
+  .topbar {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    padding-block: 16px 14px;
+  }
+  #room-title-input {
+    font-size: 20px; font-weight: 900; letter-spacing: -0.02em;
+    background: transparent; border: 1.5px solid transparent; padding: 6px 10px;
+    width: auto; min-width: 120px; max-width: 380px; flex: 1;
+  }
+  #room-title-input:hover, #room-title-input:focus { border-color: var(--line); background: var(--card-2); }
+  .topbar .spacer { flex: 1; }
+  .toggle { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13.5px; font-weight: 600; }
+  .switch { position: relative; width: 40px; height: 22px; flex: none; }
+  .switch input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+  .switch i {
+    position: absolute; inset: 0; background: var(--card-2); border: 1.5px solid var(--line);
+    border-radius: 999px; transition: background 0.15s; pointer-events: none;
+  }
+  .switch i::after {
+    content: ""; position: absolute; top: 2px; left: 2px; width: 15px; height: 15px;
+    border-radius: 50%; background: var(--muted); transition: transform 0.15s, background 0.15s;
+  }
+  .switch input:checked + i { background: var(--accent-soft); border-color: var(--accent); }
+  .switch input:checked + i::after { transform: translateX(18px); background: var(--accent); }
+
+  .cols { display: grid; grid-template-columns: 340px 1fr; gap: 16px; align-items: start; }
+  @media (max-width: 860px) { .cols { grid-template-columns: 1fr; } }
+
+  .panel-h { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+  .panel-h h2 { font-size: 12.5px; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); margin: 0; }
+
+  .poll-item {
+    display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+    background: var(--card-2); border: 1.5px solid var(--line); color: var(--text);
+    border-radius: 11px; padding: 11px 13px; margin-bottom: 8px;
+  }
+  .poll-item:hover { border-color: var(--muted); }
+  .poll-item.selected { border-color: var(--accent); }
+  .poll-item .t { flex: 1; min-width: 0; }
+  .poll-item .t b { display: block; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .poll-item .t small { color: var(--muted); font-size: 12px; }
+  .tag {
+    flex: none; font-size: 10.5px; font-weight: 800; letter-spacing: 0.07em; text-transform: uppercase;
+    padding: 3px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted);
+  }
+  .tag.live { color: var(--accent); border-color: rgba(255,122,46,0.5); background: var(--accent-soft); }
+
+  .field { margin-bottom: 14px; }
+  .field label { display: block; font-size: 12.5px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); margin-bottom: 6px; }
+  .optrow { display: flex; gap: 8px; margin-bottom: 8px; }
+  .optrow .btn { flex: none; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+
+  /* results */
+  .bars { display: flex; flex-direction: column; gap: 12px; }
+  .bar-row .bar-label { display: flex; justify-content: space-between; gap: 10px; font-size: 15px; font-weight: 600; margin-bottom: 5px; }
+  .bar-label .pct { color: var(--muted); font-variant-numeric: tabular-nums; flex: none; }
+  .bar-track { background: var(--card-2); border-radius: 7px; height: 16px; overflow: hidden; }
+  .bar-fill { height: 100%; border-radius: 7px; transition: width 0.5s cubic-bezier(0.22, 1, 0.36, 1); min-width: 2px; }
+  .bar-row.winner .bar-label { color: var(--accent); }
+  .respondents { color: var(--muted); font-size: 13px; margin-top: 12px; font-variant-numeric: tabular-nums; }
+  .cloud { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: baseline; justify-content: center; padding: 12px 0; }
+  .cloud span { font-weight: 800; line-height: 1.1; }
+
+  .msg { display: flex; gap: 10px; align-items: flex-start; padding: 10px 2px; border-bottom: 1px solid var(--line); }
+  .msg:last-child { border-bottom: none; }
+  .msg .body { flex: 1; min-width: 0; overflow-wrap: break-word; }
+  .msg.hiddenmsg .body { color: var(--muted); text-decoration: line-through; }
+  .msg .meta { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+
+  .banner {
+    background: var(--accent-soft); border: 1px solid rgba(255,122,46,0.35);
+    border-radius: var(--radius); padding: 10px 14px; font-size: 13.5px; margin-bottom: 14px;
+  }
+  .banner strong { color: var(--accent); }
+
+  /* ---- big screen mode ---- */
+  #stage {
+    position: fixed; inset: 0; z-index: 100; background: var(--bg);
+    display: flex; flex-direction: column; padding: 4vh 5vw;
+  }
+  #stage .head { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; }
+  #stage h1 { font-size: clamp(28px, 4.6vw, 58px); font-weight: 900; letter-spacing: -0.02em; margin: 0; max-width: 72vw; text-wrap: balance; }
+  #stage .content { flex: 1; display: flex; flex-direction: column; justify-content: center; padding-block: 3vh; min-height: 0; overflow: hidden; }
+  #stage .bars { gap: 2.4vh; }
+  #stage .bar-row .bar-label { font-size: clamp(16px, 2.2vw, 30px); margin-bottom: 0.8vh; }
+  #stage .bar-track { height: clamp(18px, 3.4vh, 34px); border-radius: 10px; }
+  #stage .cloud span { line-height: 1.15; }
+  #stage .foot { display: flex; justify-content: space-between; align-items: flex-end; gap: 20px; }
+  #stage .join { display: flex; align-items: center; gap: 16px; }
+  #stage .join .url { font-size: clamp(16px, 2vw, 26px); font-weight: 800; color: var(--accent); }
+  #stage .join .lbl { color: var(--muted); font-size: clamp(12px, 1.2vw, 16px); }
+  #qr { background: #fff; padding: 8px; border-radius: 10px; line-height: 0; }
+  #stage .count { color: var(--muted); font-size: clamp(14px, 1.6vw, 22px); font-variant-numeric: tabular-nums; }
+  #stage .waiting-big { text-align: center; color: var(--muted); font-size: clamp(20px, 3vw, 40px); font-weight: 700; }
+  #stage-exit { position: absolute; top: 14px; right: 16px; }
+</style>
+</head>
+<body>
+
+<div id="gate">
+  <div class="card">
+    <h1>PollRoom Presenter</h1>
+    <p>Enter the presenter passphrase to open the console.</p>
+    <input type="text" id="gate-pass" placeholder="Passphrase" autocomplete="off">
+    <button class="btn" id="gate-btn" style="width:100%;margin-top:12px">Open console</button>
+    <div class="err" id="gate-err" hidden></div>
+    <p class="hint" id="gate-demo-hint" style="margin-top:12px" hidden>Demo mode: any passphrase works.</p>
+  </div>
+</div>
+
+<div id="app" hidden>
+  <div class="banner" id="demo-banner" hidden>
+    <strong>Demo mode.</strong> Fake local data — open the audience page in another tab and they stay in sync.
+    Add Supabase keys to <code>config.js</code> to go live.
+  </div>
+
+  <div class="topbar">
+    <input type="text" id="room-title-input" maxlength="80" title="Room title (click to edit)">
+    <span class="spacer"></span>
+    <label class="toggle"><span class="switch"><input type="checkbox" id="comments-toggle"><i></i></span> Room chat</label>
+    <button class="btn ghost sm" id="copy-link">Copy audience link</button>
+    <button class="btn sm" id="present-btn">Present ▸</button>
+  </div>
+
+  <div class="cols">
+    <div>
+      <div class="card">
+        <div class="panel-h"><h2>Polls</h2><button class="btn sm" id="new-poll">+ New</button></div>
+        <div id="poll-list"></div>
+      </div>
+    </div>
+
+    <div>
+      <div class="card" id="editor" hidden>
+        <div class="panel-h"><h2 id="editor-h">Edit poll</h2></div>
+        <div class="field"><label for="ed-title">Question</label>
+          <input type="text" id="ed-title" maxlength="200" placeholder="What should we ask the room?"></div>
+        <div class="field"><label for="ed-type">Type</label>
+          <select id="ed-type">
+            <option value="choice">Multiple choice</option>
+            <option value="words">Word cloud</option>
+            <option value="open">Open response (Q&amp;A)</option>
+          </select></div>
+        <div class="field" id="ed-options-field"><label>Options</label>
+          <div id="ed-options"></div>
+          <button class="btn ghost sm" id="ed-add-opt">+ Add option</button>
+          <label class="toggle" style="margin-top:10px"><span class="switch"><input type="checkbox" id="ed-multi"><i></i></span> Allow multiple selections</label>
+        </div>
+        <div class="row">
+          <button class="btn" id="ed-save">Save poll</button>
+          <button class="btn ghost" id="ed-cancel">Cancel</button>
+          <span class="spacer" style="flex:1"></span>
+          <button class="btn danger sm" id="ed-delete" hidden>Delete</button>
+        </div>
+        <div class="err" id="ed-err" hidden></div>
+      </div>
+
+      <div class="card" id="live-panel" style="margin-bottom:16px">
+        <div class="panel-h"><h2>On screen now</h2>
+          <div class="row">
+            <button class="btn ghost sm" id="reset-btn" hidden>Reset responses</button>
+            <button class="btn ghost sm" id="end-btn" hidden>End poll</button>
+          </div>
+        </div>
+        <div id="live-body"></div>
+      </div>
+
+      <div class="card" id="mod-panel">
+        <div class="panel-h"><h2>Messages &amp; moderation</h2></div>
+        <div id="mod-feed"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="stage" hidden>
+  <button class="btn ghost sm" id="stage-exit">Exit (Esc)</button>
+  <div class="head"><h1 id="stage-q"></h1></div>
+  <div class="content" id="stage-content"></div>
+  <div class="foot">
+    <div class="join">
+      <div id="qr"></div>
+      <div><div class="lbl">Join at</div><div class="url" id="stage-url"></div></div>
+    </div>
+    <div class="count" id="stage-count"></div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="config.js"></script>
+<script src="shared.js"></script>
+<script>
+(function () {
+  "use strict";
+  const { api, configured, COLORS, timeAgo, esc } = window.PollRoom;
+  const $ = (id) => document.getElementById(id);
+
+  let pass = null;
+  try { pass = sessionStorage.getItem("pr_pass"); } catch (e) {}
+  let room = null, polls = [], counts = null, messages = [];
+  let editing = null;          // poll object being edited, or {id:null,...}
+  let selectedId = null;
+  let staged = false;
+
+  $("demo-banner").hidden = configured;
+  $("gate-demo-hint").hidden = configured;
+
+  // ---------- gate ----------
+  async function tryPass(p) {
+    const ok = await api.checkPass(p);
+    if (!ok) throw new Error("Wrong passphrase");
+    pass = p;
+    try { sessionStorage.setItem("pr_pass", p); } catch (e) {}
+    $("gate").hidden = true;
+    $("app").hidden = false;
+    refresh();
+  }
+  $("gate-btn").addEventListener("click", async () => {
+    const p = $("gate-pass").value;
+    if (!p) return;
+    $("gate-btn").disabled = true;
+    try { await tryPass(p); }
+    catch (e) { const el = $("gate-err"); el.hidden = false; el.textContent = e.message; }
+    $("gate-btn").disabled = false;
+  });
+  $("gate-pass").addEventListener("keydown", (e) => { if (e.key === "Enter") $("gate-btn").click(); });
+  if (pass) { tryPass(pass).catch(() => { pass = null; }); }
+
+  // ---------- data ----------
+  async function refresh() {
+    if (!pass) return;
+    try {
+      const [r, p, m] = await Promise.all([api.getRoom(), api.getPolls(), api.getMessages()]);
+      room = r; polls = p; messages = m;
+      const active = activePoll();
+      counts = active ? await api.getCounts(active.id) : null;
+      render();
+    } catch (e) { console.error("refresh failed", e); }
+  }
+  const activePoll = () => (room && room.active_poll_id ? polls.find((x) => x.id === room.active_poll_id) : null);
+
+  function guard(fn) {
+    return async (...args) => {
+      try { await fn(...args); await refresh(); }
+      catch (e) { alert(e.message); }
+    };
+  }
+
+  // ---------- render ----------
+  function render() {
+    if (document.activeElement !== $("room-title-input")) $("room-title-input").value = room.title || "";
+    $("comments-toggle").checked = !!room.comments_open;
+
+    // poll list
+    $("poll-list").innerHTML = polls.map((p) => {
+      const live = room.active_poll_id === p.id;
+      const kind = { choice: "Multiple choice", words: "Word cloud", open: "Open response" }[p.type];
+      return (
+        '<button class="poll-item' + (selectedId === p.id ? " selected" : "") + '" data-id="' + p.id + '">' +
+        '<div class="t"><b>' + esc(p.title) + "</b><small>" + kind + "</small></div>" +
+        (live ? '<span class="tag live">Live</span>' : '<span class="tag">Ready</span>') +
+        "</button>"
+      );
+    }).join("") || '<div class="hint">No polls yet — create your first one.</div>';
+    document.querySelectorAll(".poll-item").forEach((el) => {
+      el.addEventListener("click", () => { selectedId = el.dataset.id; openEditor(polls.find((p) => p.id === selectedId)); render(); });
+    });
+
+    renderLive();
+    renderModeration();
+    if (staged) renderStage();
+  }
+
+  function renderLive() {
+    const poll = activePoll();
+    $("end-btn").hidden = !poll;
+    $("reset-btn").hidden = !poll;
+    const body = $("live-body");
+    if (!poll) {
+      const sel = polls.find((p) => p.id === selectedId);
+      body.innerHTML =
+        '<div class="hint" style="padding-block:6px">Nothing is live. ' +
+        (sel ? 'Push "' + esc(sel.title) + '" live below.' : "Select a poll and push it live.") +
+        "</div>" +
+        (sel ? '<button class="btn" id="golive-btn" style="margin-top:8px">Go live: ' + esc(sel.title) + "</button>" : "");
+      const b = $("golive-btn");
+      if (b) b.addEventListener("click", guard(() => api.setActive(pass, sel.id)));
+      return;
+    }
+    body.innerHTML =
+      '<p style="font-size:18px;font-weight:800;margin:0 0 12px">' + esc(poll.title) + "</p>" +
+      '<div id="live-results"></div>' +
+      '<div class="respondents" id="live-n"></div>';
+    renderResults(poll, counts, $("live-results"), $("live-n"), false);
+  }
+
+  function renderResults(poll, counts, el, nEl, stage) {
+    if (!el) return;
+    const c = counts || { votes: [], words: [], respondents: 0 };
+    if (nEl) nEl.textContent = c.respondents + (c.respondents === 1 ? " response" : " responses");
+    if (poll.type === "choice") {
+      const byIdx = {};
+      c.votes.forEach((v) => { byIdx[v.option_idx] = v.n; });
+      const total = Object.values(byIdx).reduce((a, b) => a + b, 0);
+      const max = Math.max(1, ...Object.values(byIdx));
+      el.innerHTML = '<div class="bars">' + poll.options.map((o, i) => {
+        const n = byIdx[i] || 0;
+        const pct = total ? Math.round((n / total) * 100) : 0;
+        return (
+          '<div class="bar-row' + (n === max && n > 0 ? " winner" : "") + '">' +
+          '<div class="bar-label"><span>' + esc(o) + '</span><span class="pct">' + pct + "% · " + n + "</span></div>" +
+          '<div class="bar-track"><div class="bar-fill" style="width:' + (total ? Math.max(1, (n / max) * 100) : 0) + "%;background:" + COLORS[i % COLORS.length] + '"></div></div>' +
+          "</div>"
+        );
+      }).join("") + "</div>";
+    } else if (poll.type === "words") {
+      const sorted = c.words.slice().sort((a, b) => b.n - a.n).slice(0, 60);
+      const max = Math.max(1, ...sorted.map((w) => w.n));
+      const base = stage ? 26 : 15, spread = stage ? 72 : 30;
+      el.innerHTML = '<div class="cloud">' + (sorted.map((w, i) =>
+        '<span style="font-size:' + Math.round(base + spread * (w.n / max)) + "px;color:" + COLORS[i % COLORS.length] + '">' + esc(w.word) + "</span>"
+      ).join("") || '<span style="color:var(--muted);font-weight:400">Waiting for words…</span>') + "</div>";
+    } else {
+      const list = messages.filter((m) => m.poll_id === poll.id && !m.hidden)
+        .sort((a, b) => b.upvotes - a.upvotes).slice(0, stage ? 8 : 30);
+      el.innerHTML = list.map((m) =>
+        '<div class="msg"><div class="body"' + (stage ? ' style="font-size:clamp(16px,2vw,28px);font-weight:600"' : "") + ">" + esc(m.body) + "</div>" +
+        '<div class="meta">▲ ' + m.upvotes + "</div></div>"
+      ).join("") || '<div class="hint">Waiting for responses…</div>';
+    }
+  }
+
+  $("end-btn").addEventListener("click", guard(() => api.setActive(pass, null)));
+  $("reset-btn").addEventListener("click", guard(() => {
+    const poll = activePoll();
+    if (!poll) return;
+    if (!confirm('Clear all responses for "' + poll.title + '"?')) return Promise.resolve();
+    return api.resetPoll(pass, poll.id);
+  }));
+
+  // ---------- moderation ----------
+  function renderModeration() {
+    const feed = $("mod-feed");
+    const list = messages.slice(0, 100);
+    feed.innerHTML = list.map((m) => {
+      const scope = m.poll_id ? ((polls.find((p) => p.id === m.poll_id) || {}).title || "poll") : "Room chat";
+      return (
+        '<div class="msg' + (m.hidden ? " hiddenmsg" : "") + '">' +
+        '<div class="body">' + esc(m.body) +
+        '<div class="meta">' + esc(scope) + " · " + timeAgo(m.created_at) + " · ▲ " + m.upvotes + "</div></div>" +
+        '<button class="btn ghost sm" data-id="' + m.id + '" data-h="' + (m.hidden ? 0 : 1) + '">' + (m.hidden ? "Unhide" : "Hide") + "</button>" +
+        "</div>"
+      );
+    }).join("") || '<div class="hint">No messages yet.</div>';
+    feed.querySelectorAll("button").forEach((b) => {
+      b.addEventListener("click", guard(() => api.hideMessage(pass, b.dataset.id, b.dataset.h === "1")));
+    });
+  }
+
+  // ---------- topbar ----------
+  $("room-title-input").addEventListener("change", guard(() => api.setRoom(pass, { title: $("room-title-input").value })));
+  $("comments-toggle").addEventListener("change", guard(() => api.setRoom(pass, { comments_open: $("comments-toggle").checked })));
+  $("copy-link").addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(audienceUrl());
+      $("copy-link").textContent = "Copied!";
+      setTimeout(() => { $("copy-link").textContent = "Copy audience link"; }, 1500);
+    } catch (e) { prompt("Audience link:", audienceUrl()); }
+  });
+  function audienceUrl() {
+    return location.origin + location.pathname.replace(/present\.html.*$/, "");
+  }
+
+  // ---------- editor ----------
+  function openEditor(poll) {
+    editing = poll ? JSON.parse(JSON.stringify(poll)) : { id: null, title: "", type: "choice", options: ["", ""], allow_multiple: false };
+    $("editor").hidden = false;
+    $("editor-h").textContent = poll ? "Edit poll" : "New poll";
+    $("ed-delete").hidden = !poll;
+    $("ed-title").value = editing.title;
+    $("ed-type").value = editing.type;
+    $("ed-multi").checked = !!editing.allow_multiple;
+    renderOptionInputs();
+    typeChanged();
+    $("ed-err").hidden = true;
+  }
+  function renderOptionInputs() {
+    $("ed-options").innerHTML = (editing.options.length ? editing.options : ["", ""]).map((o, i) =>
+      '<div class="optrow"><input type="text" maxlength="120" data-i="' + i + '" value="' + esc(o) + '" placeholder="Option ' + (i + 1) + '">' +
+      '<button class="btn ghost sm" data-del="' + i + '" aria-label="Remove option">✕</button></div>'
+    ).join("");
+    $("ed-options").querySelectorAll("input").forEach((inp) => {
+      inp.addEventListener("input", () => { editing.options[+inp.dataset.i] = inp.value; });
+    });
+    $("ed-options").querySelectorAll("[data-del]").forEach((b) => {
+      b.addEventListener("click", () => { editing.options.splice(+b.dataset.del, 1); renderOptionInputs(); });
+    });
+  }
+  function typeChanged() { $("ed-options-field").hidden = $("ed-type").value !== "choice"; }
+  $("ed-type").addEventListener("change", typeChanged);
+  $("ed-add-opt").addEventListener("click", () => { editing.options.push(""); renderOptionInputs(); });
+  $("new-poll").addEventListener("click", () => { selectedId = null; openEditor(null); });
+  $("ed-cancel").addEventListener("click", () => { $("editor").hidden = true; });
+  $("ed-save").addEventListener("click", async () => {
+    const p = {
+      id: editing.id,
+      title: $("ed-title").value,
+      type: $("ed-type").value,
+      options: $("ed-type").value === "choice" ? editing.options.map((o) => o.trim()).filter(Boolean) : [],
+      allow_multiple: $("ed-multi").checked,
+    };
+    try {
+      const id = await api.savePoll(pass, p);
+      selectedId = id;
+      $("editor").hidden = true;
+      refresh();
+    } catch (e) { const el = $("ed-err"); el.hidden = false; el.textContent = e.message; }
+  });
+  $("ed-delete").addEventListener("click", guard(() => {
+    if (!confirm("Delete this poll and all its responses?")) return Promise.resolve();
+    $("editor").hidden = true;
+    const id = editing.id;
+    if (selectedId === id) selectedId = null;
+    return api.deletePoll(pass, id);
+  }));
+
+  // ---------- big screen ----------
+  let qr = null;
+  $("present-btn").addEventListener("click", () => {
+    staged = true;
+    $("stage").hidden = false;
+    const url = audienceUrl();
+    $("stage-url").textContent = url.replace(/^https?:\/\//, "");
+    $("qr").innerHTML = "";
+    if (window.QRCode) qr = new QRCode($("qr"), { text: url, width: 110, height: 110, colorDark: "#10141b", colorLight: "#ffffff" });
+    if (document.documentElement.requestFullscreen) document.documentElement.requestFullscreen().catch(() => {});
+    renderStage();
+  });
+  function exitStage() {
+    staged = false;
+    $("stage").hidden = true;
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  }
+  $("stage-exit").addEventListener("click", exitStage);
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && staged) exitStage(); });
+
+  function renderStage() {
+    const poll = activePoll();
+    if (!poll) {
+      $("stage-q").textContent = room.title || "PollRoom";
+      $("stage-content").innerHTML = '<div class="waiting-big">Scan the code to join — first poll coming up.</div>';
+      $("stage-count").textContent = "";
+      return;
+    }
+    $("stage-q").textContent = poll.title;
+    renderResults(poll, counts, $("stage-content"), null, true);
+    $("stage-count").textContent = counts ? counts.respondents + (counts.respondents === 1 ? " response" : " responses") : "";
+  }
+
+  api.onChange(refresh);
+})();
+</script>
+</body>
+</html>

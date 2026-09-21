@@ -1,0 +1,313 @@
+/* PollRoom shared core: config check, device id, and a data API that
+   talks to Supabase when configured, or to an in-browser demo store
+   (synced across tabs via localStorage) when not. */
+(function () {
+  "use strict";
+
+  const cfg = window.POLLROOM_CONFIG || {};
+  const configured =
+    cfg.SUPABASE_URL && !/YOUR-PROJECT/i.test(cfg.SUPABASE_URL) &&
+    cfg.SUPABASE_ANON_KEY && !/YOUR-ANON/i.test(cfg.SUPABASE_ANON_KEY);
+
+  function uuid() {
+    if (crypto.randomUUID) return crypto.randomUUID();
+    return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+      const r = (Math.random() * 16) | 0;
+      return (c === "x" ? r : (r & 0x3) | 0x8).toString(16);
+    });
+  }
+
+  let deviceId;
+  try {
+    deviceId = localStorage.getItem("pr_device");
+    if (!deviceId) {
+      deviceId = uuid();
+      localStorage.setItem("pr_device", deviceId);
+    }
+  } catch (e) {
+    deviceId = uuid();
+  }
+
+  // Small localStorage helpers (all guarded — storage can be blocked).
+  function lsGet(key, fallback) {
+    try {
+      const raw = localStorage.getItem(key);
+      return raw ? JSON.parse(raw) : fallback;
+    } catch (e) { return fallback; }
+  }
+  function lsSet(key, val) {
+    try { localStorage.setItem(key, JSON.stringify(val)); } catch (e) {}
+  }
+
+  // ---------------------------------------------------------------
+  // Demo store (used only when Supabase isn't configured yet)
+  // ---------------------------------------------------------------
+  const DEMO_KEY = "pr_demo_v1";
+
+  function demoSeed() {
+    const p1 = uuid(), p2 = uuid(), p3 = uuid();
+    const m1 = uuid(), m2 = uuid(), m3 = uuid();
+    const votes = [];
+    const spread = [14, 9, 6, 11];
+    spread.forEach((n, idx) => {
+      for (let i = 0; i < n; i++) votes.push({ id: uuid(), poll_id: p1, device_id: uuid(), option_idx: idx });
+    });
+    const wordSpread = { energized: 7, tired: 3, hopeful: 5, caffeinated: 4, ready: 2, overbooked: 1 };
+    const words = [];
+    Object.entries(wordSpread).forEach(([w, n]) => {
+      for (let i = 0; i < n; i++) words.push({ id: uuid(), poll_id: p2, device_id: uuid(), word: w });
+    });
+    const now = Date.now();
+    return {
+      room: { id: 1, title: "Demo Event", active_poll_id: p1, comments_open: true },
+      polls: [
+        { id: p1, title: "How are you feeling about tonight?", type: "choice", options: ["Fired up", "Curious", "Nervous", "Just here for the tacos"], allow_multiple: false, position: 0 },
+        { id: p2, title: "One word to describe this semester", type: "words", options: [], allow_multiple: false, position: 1 },
+        { id: p3, title: "What should we ask the panel?", type: "open", options: [], allow_multiple: false, position: 2 },
+      ],
+      votes,
+      words,
+      messages: [
+        { id: m1, poll_id: null, device_id: uuid(), body: "Great turnout tonight 👏", hidden: false, created_at: new Date(now - 4 * 60000).toISOString() },
+        { id: m2, poll_id: null, device_id: uuid(), body: "Can the slides be shared afterward?", hidden: false, created_at: new Date(now - 2 * 60000).toISOString() },
+        { id: m3, poll_id: null, device_id: uuid(), body: "This is demo data — connect Supabase to go live.", hidden: false, created_at: new Date(now - 1 * 60000).toISOString() },
+      ],
+      upvotes: [
+        { message_id: m2, device_id: uuid() },
+        { message_id: m2, device_id: uuid() },
+        { message_id: m1, device_id: uuid() },
+      ],
+    };
+  }
+
+  function demoLoad() {
+    let s = lsGet(DEMO_KEY, null);
+    if (!s || !s.room) { s = demoSeed(); lsSet(DEMO_KEY, s); }
+    return s;
+  }
+  function demoSave(s) {
+    lsSet(DEMO_KEY, s);
+    changed(); // notify this tab; other tabs get the storage event
+  }
+
+  // ---------------------------------------------------------------
+  // Change notification (broadcast + polling in live mode;
+  // storage events across tabs in demo mode)
+  // ---------------------------------------------------------------
+  const listeners = [];
+  let notifyTimer = null;
+  function changed() {
+    // debounce bursts into one refresh
+    clearTimeout(notifyTimer);
+    notifyTimer = setTimeout(() => listeners.forEach((fn) => { try { fn(); } catch (e) {} }), 120);
+  }
+
+  let sb = null, pingChannel = null, channelReady = false;
+
+  if (configured) {
+    sb = window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY);
+    pingChannel = sb.channel("pollroom");
+    pingChannel
+      .on("broadcast", { event: "ping" }, () => changed())
+      .subscribe((status) => { channelReady = status === "SUBSCRIBED"; });
+    // Safety net: refresh every 12s even if a broadcast is missed.
+    setInterval(changed, 12000);
+  } else {
+    window.addEventListener("storage", (e) => { if (e.key === DEMO_KEY) changed(); });
+  }
+
+  function ping() {
+    if (configured && channelReady) {
+      pingChannel.send({ type: "broadcast", event: "ping", payload: {} }).catch(() => {});
+    }
+  }
+
+  function fail(error) {
+    const msg = (error && (error.message || error.error_description)) || "Something went wrong";
+    throw new Error(msg.replace(/^.*?: /, "").trim() || "Something went wrong");
+  }
+
+  async function rpc(name, args) {
+    const { data, error } = await sb.rpc(name, args);
+    if (error) fail(error);
+    return data;
+  }
+
+  // ---------------------------------------------------------------
+  // Public API — same surface in both modes
+  // ---------------------------------------------------------------
+  const api = {};
+
+  if (configured) {
+    api.getRoom = async () => {
+      const { data, error } = await sb.from("room").select("*").eq("id", 1).single();
+      if (error) fail(error);
+      return data;
+    };
+    api.getPolls = async () => {
+      const { data, error } = await sb.from("polls").select("*").order("position");
+      if (error) fail(error);
+      return data;
+    };
+    api.getCounts = async (pollId) => {
+      const [vc, wc, rc] = await Promise.all([
+        sb.from("vote_counts").select("*").eq("poll_id", pollId),
+        sb.from("word_counts").select("*").eq("poll_id", pollId),
+        sb.from("respondent_counts").select("*").eq("poll_id", pollId),
+      ]);
+      if (vc.error) fail(vc.error);
+      if (wc.error) fail(wc.error);
+      return {
+        votes: vc.data || [],
+        words: wc.data || [],
+        respondents: (rc.data || []).reduce((a, r) => a + r.n, 0),
+      };
+    };
+    api.getMessages = async () => {
+      const { data, error } = await sb
+        .from("messages_public").select("*")
+        .order("created_at", { ascending: false }).limit(300);
+      if (error) fail(error);
+      return data;
+    };
+    api.castVote = async (pollId, options) => { await rpc("cast_vote", { _poll: pollId, _device: deviceId, _options: options }); ping(); };
+    api.submitWords = async (pollId, words) => { await rpc("submit_words", { _poll: pollId, _device: deviceId, _words: words }); ping(); };
+    api.postMessage = async (body, pollId) => { await rpc("post_message", { _device: deviceId, _body: body, _poll: pollId || null }); ping(); };
+    api.toggleUpvote = async (messageId) => { const r = await rpc("toggle_upvote", { _message: messageId, _device: deviceId }); ping(); return r; };
+    api.checkPass = async (pass) => rpc("check_admin", { _pass: pass });
+    api.savePoll = async (pass, p) => { const id = await rpc("admin_save_poll", { _pass: pass, _id: p.id || null, _title: p.title, _type: p.type, _options: p.options || [], _allow_multiple: !!p.allow_multiple }); ping(); return id; };
+    api.deletePoll = async (pass, id) => { await rpc("admin_delete_poll", { _pass: pass, _id: id }); ping(); };
+    api.setActive = async (pass, id) => { await rpc("admin_set_active", { _pass: pass, _poll: id }); ping(); };
+    api.setRoom = async (pass, { title, comments_open }) => { await rpc("admin_set_room", { _pass: pass, _title: title ?? null, _comments_open: comments_open ?? null }); ping(); };
+    api.hideMessage = async (pass, id, hidden) => { await rpc("admin_hide_message", { _pass: pass, _id: id, _hidden: hidden }); ping(); };
+    api.resetPoll = async (pass, id) => { await rpc("admin_reset_poll", { _pass: pass, _id: id }); ping(); };
+  } else {
+    // ------- demo implementations -------
+    const activeGuard = (s, pollId) => {
+      if (s.room.active_poll_id !== pollId) throw new Error("poll is not live");
+    };
+    api.getRoom = async () => demoLoad().room;
+    api.getPolls = async () => demoLoad().polls.slice().sort((a, b) => a.position - b.position);
+    api.getCounts = async (pollId) => {
+      const s = demoLoad();
+      const votes = {};
+      s.votes.filter((v) => v.poll_id === pollId).forEach((v) => { votes[v.option_idx] = (votes[v.option_idx] || 0) + 1; });
+      const words = {};
+      s.words.filter((w) => w.poll_id === pollId).forEach((w) => { const k = w.word.toLowerCase(); words[k] = (words[k] || 0) + 1; });
+      const devs = new Set(
+        s.votes.filter((v) => v.poll_id === pollId).map((v) => v.device_id)
+          .concat(s.words.filter((w) => w.poll_id === pollId).map((w) => w.device_id))
+      );
+      return {
+        votes: Object.entries(votes).map(([k, n]) => ({ poll_id: pollId, option_idx: +k, n })),
+        words: Object.entries(words).map(([w, n]) => ({ poll_id: pollId, word: w, n })),
+        respondents: devs.size,
+      };
+    };
+    api.getMessages = async () => {
+      const s = demoLoad();
+      return s.messages
+        .map((m) => ({ ...m, upvotes: s.upvotes.filter((u) => u.message_id === m.id).length }))
+        .sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
+    };
+    api.castVote = async (pollId, options) => {
+      const s = demoLoad();
+      activeGuard(s, pollId);
+      s.votes = s.votes.filter((v) => !(v.poll_id === pollId && v.device_id === deviceId));
+      options.forEach((o) => s.votes.push({ id: uuid(), poll_id: pollId, device_id: deviceId, option_idx: o }));
+      demoSave(s);
+    };
+    api.submitWords = async (pollId, words) => {
+      const s = demoLoad();
+      activeGuard(s, pollId);
+      s.words = s.words.filter((w) => !(w.poll_id === pollId && w.device_id === deviceId));
+      words.slice(0, 3).forEach((w) => s.words.push({ id: uuid(), poll_id: pollId, device_id: deviceId, word: w }));
+      demoSave(s);
+    };
+    api.postMessage = async (body, pollId) => {
+      const s = demoLoad();
+      const b = body.trim();
+      if (!b || b.length > 280) throw new Error("message must be 1-280 characters");
+      if (!pollId && !s.room.comments_open) throw new Error("comments are closed");
+      if (pollId) activeGuard(s, pollId);
+      s.messages.push({ id: uuid(), poll_id: pollId || null, device_id: deviceId, body: b, hidden: false, created_at: new Date().toISOString() });
+      demoSave(s);
+    };
+    api.toggleUpvote = async (messageId) => {
+      const s = demoLoad();
+      const before = s.upvotes.length;
+      s.upvotes = s.upvotes.filter((u) => !(u.message_id === messageId && u.device_id === deviceId));
+      let nowUp = false;
+      if (s.upvotes.length === before) { s.upvotes.push({ message_id: messageId, device_id: deviceId }); nowUp = true; }
+      demoSave(s);
+      return nowUp;
+    };
+    api.checkPass = async () => true; // demo: any passphrase works
+    api.savePoll = async (_pass, p) => {
+      const s = demoLoad();
+      if (!p.title || !p.title.trim()) throw new Error("title required");
+      if (p.type === "choice" && (p.options || []).length < 2) throw new Error("choice polls need at least 2 options");
+      if (p.id) {
+        const ex = s.polls.find((x) => x.id === p.id);
+        Object.assign(ex, { title: p.title.trim(), type: p.type, options: p.options || [], allow_multiple: !!p.allow_multiple });
+        demoSave(s);
+        return p.id;
+      }
+      const id = uuid();
+      s.polls.push({ id, title: p.title.trim(), type: p.type, options: p.options || [], allow_multiple: !!p.allow_multiple, position: s.polls.length });
+      demoSave(s);
+      return id;
+    };
+    api.deletePoll = async (_pass, id) => {
+      const s = demoLoad();
+      s.polls = s.polls.filter((p) => p.id !== id);
+      s.votes = s.votes.filter((v) => v.poll_id !== id);
+      s.words = s.words.filter((w) => w.poll_id !== id);
+      s.messages = s.messages.filter((m) => m.poll_id !== id);
+      if (s.room.active_poll_id === id) s.room.active_poll_id = null;
+      demoSave(s);
+    };
+    api.setActive = async (_pass, id) => { const s = demoLoad(); s.room.active_poll_id = id; demoSave(s); };
+    api.setRoom = async (_pass, { title, comments_open }) => {
+      const s = demoLoad();
+      if (title != null && title.trim()) s.room.title = title.trim();
+      if (comments_open != null) s.room.comments_open = comments_open;
+      demoSave(s);
+    };
+    api.hideMessage = async (_pass, id, hidden) => {
+      const s = demoLoad();
+      const m = s.messages.find((x) => x.id === id);
+      if (m) m.hidden = hidden;
+      demoSave(s);
+    };
+    api.resetPoll = async (_pass, id) => {
+      const s = demoLoad();
+      s.votes = s.votes.filter((v) => v.poll_id !== id);
+      s.words = s.words.filter((w) => w.poll_id !== id);
+      s.messages = s.messages.filter((m) => m.poll_id !== id);
+      demoSave(s);
+    };
+  }
+
+  api.onChange = (fn) => listeners.push(fn);
+
+  window.PollRoom = {
+    api,
+    deviceId,
+    configured,
+    lsGet,
+    lsSet,
+    uuid,
+    COLORS: ["#FF7A2E", "#43C6AC", "#F2C94C", "#6C9BF2", "#E86AA6", "#9B7BF2", "#57B75E", "#E05B5B"],
+    timeAgo(iso) {
+      const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+      if (s < 60) return "just now";
+      if (s < 3600) return Math.floor(s / 60) + "m ago";
+      if (s < 86400) return Math.floor(s / 3600) + "h ago";
+      return Math.floor(s / 86400) + "d ago";
+    },
+    esc(str) {
+      return String(str).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    },
+  };
+})();

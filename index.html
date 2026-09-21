@@ -1,0 +1,504 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>PollRoom</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;800;900&display=swap">
+<style>
+  :root {
+    --bg: #10141b;
+    --card: #1a212c;
+    --card-2: #212a37;
+    --line: #2c3646;
+    --text: #edf1f7;
+    --muted: #8b96a5;
+    --accent: #ff7a2e;
+    --accent-soft: rgba(255, 122, 46, 0.14);
+    --good: #43c6ac;
+    --radius: 14px;
+    --font: "Archivo", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font);
+    font-size: 16px;
+    line-height: 1.45;
+    padding-inline: 16px;
+    padding-block: env(safe-area-inset-top, 0px) calc(env(safe-area-inset-bottom, 0px) + 48px);
+  }
+  .wrap { max-width: 560px; margin: 0 auto; }
+
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 12px; padding-block: 18px 10px;
+  }
+  h1 { font-size: 22px; font-weight: 900; letter-spacing: -0.02em; margin: 0; text-wrap: balance; }
+  .live-pill {
+    display: inline-flex; align-items: center; gap: 7px; flex: none;
+    font-size: 12px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--accent); background: var(--accent-soft);
+    border: 1px solid rgba(255, 122, 46, 0.35);
+    padding: 5px 11px; border-radius: 999px;
+  }
+  .live-pill .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); animation: pulse 1.6s ease-in-out infinite; }
+  .live-pill.idle { color: var(--muted); background: transparent; border-color: var(--line); }
+  .live-pill.idle .dot { background: var(--muted); animation: none; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+  @media (prefers-reduced-motion: reduce) { .live-pill .dot { animation: none; } }
+
+  .banner {
+    background: var(--accent-soft); border: 1px solid rgba(255,122,46,0.35);
+    color: var(--text); border-radius: var(--radius);
+    padding: 10px 14px; font-size: 13.5px; margin-bottom: 14px;
+  }
+  .banner strong { color: var(--accent); }
+
+  .card {
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: var(--radius); padding: 18px; margin-bottom: 16px;
+  }
+  .poll-q { font-size: 20px; font-weight: 800; letter-spacing: -0.01em; margin: 0 0 4px; text-wrap: balance; }
+  .poll-meta { color: var(--muted); font-size: 13px; margin-bottom: 14px; }
+
+  .opts { display: flex; flex-direction: column; gap: 9px; }
+  .opt {
+    display: flex; align-items: center; gap: 12px; width: 100%;
+    text-align: left; font: inherit; font-weight: 600; color: var(--text);
+    background: var(--card-2); border: 1.5px solid var(--line);
+    border-radius: 11px; padding: 13px 15px; cursor: pointer;
+    transition: border-color 0.12s, background 0.12s;
+  }
+  .opt:hover { border-color: var(--muted); }
+  .opt.sel { border-color: var(--accent); background: var(--accent-soft); }
+  .opt .tick {
+    width: 20px; height: 20px; flex: none; border-radius: 50%;
+    border: 2px solid var(--muted); display: grid; place-items: center;
+    font-size: 12px; color: var(--bg); font-weight: 900;
+  }
+  .opt.multi .tick { border-radius: 6px; }
+  .opt.sel .tick { background: var(--accent); border-color: var(--accent); }
+
+  .btn {
+    font: inherit; font-weight: 800; letter-spacing: 0.01em;
+    background: var(--accent); color: #17110c; border: none;
+    border-radius: 11px; padding: 13px 22px; cursor: pointer; width: 100%;
+    margin-top: 14px; transition: filter 0.12s;
+  }
+  .btn:hover { filter: brightness(1.08); }
+  .btn:disabled { opacity: 0.45; cursor: default; }
+  .btn.ghost {
+    background: transparent; color: var(--muted);
+    border: 1.5px solid var(--line); font-weight: 600;
+  }
+  .btn:focus-visible, .opt:focus-visible, input:focus-visible, textarea:focus-visible, .upvote:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 2px;
+  }
+
+  /* results */
+  .bars { display: flex; flex-direction: column; gap: 12px; margin-top: 6px; }
+  .bar-row .bar-label {
+    display: flex; justify-content: space-between; gap: 10px;
+    font-size: 14.5px; font-weight: 600; margin-bottom: 5px;
+  }
+  .bar-label .pct { color: var(--muted); font-variant-numeric: tabular-nums; flex: none; }
+  .bar-track { background: var(--card-2); border-radius: 7px; height: 14px; overflow: hidden; }
+  .bar-fill { height: 100%; border-radius: 7px; transition: width 0.5s cubic-bezier(0.22, 1, 0.36, 1); min-width: 2px; }
+  .bar-row.winner .bar-label { color: var(--accent); }
+  .respondents { color: var(--muted); font-size: 13px; margin-top: 14px; font-variant-numeric: tabular-nums; }
+
+  .cloud { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: baseline; justify-content: center; padding: 14px 0 6px; }
+  .cloud span { font-weight: 800; line-height: 1.1; letter-spacing: -0.01em; }
+
+  input[type=text], textarea {
+    width: 100%; font: inherit; color: var(--text);
+    background: var(--card-2); border: 1.5px solid var(--line);
+    border-radius: 11px; padding: 12px 14px;
+  }
+  textarea { resize: vertical; min-height: 64px; }
+  ::placeholder { color: var(--muted); }
+  .hint { color: var(--muted); font-size: 12.5px; margin-top: 6px; }
+  .err { color: #ff8c7a; font-size: 13.5px; margin-top: 10px; }
+
+  .waiting { text-align: center; padding-block: 44px; }
+  .waiting .big { font-size: 19px; font-weight: 800; margin-top: 14px; }
+  .waiting p { color: var(--muted); margin: 6px 0 0; }
+  .waiting .dot-row { display: flex; gap: 7px; justify-content: center; }
+  .waiting .dot-row i {
+    width: 9px; height: 9px; border-radius: 50%; background: var(--accent);
+    animation: hop 1.2s ease-in-out infinite;
+  }
+  .waiting .dot-row i:nth-child(2) { animation-delay: 0.15s; }
+  .waiting .dot-row i:nth-child(3) { animation-delay: 0.3s; }
+  @keyframes hop { 0%, 100% { transform: translateY(0); opacity: 0.5; } 50% { transform: translateY(-6px); opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) { .waiting .dot-row i { animation: none; } }
+
+  .section-h {
+    display: flex; align-items: baseline; justify-content: space-between;
+    margin: 26px 0 10px;
+  }
+  .section-h h2 { font-size: 13px; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); margin: 0; }
+  .msg { display: flex; gap: 12px; padding: 13px 2px; border-bottom: 1px solid var(--line); }
+  .msg:last-child { border-bottom: none; }
+  .msg .body { flex: 1; min-width: 0; overflow-wrap: break-word; }
+  .msg .time { color: var(--muted); font-size: 12px; margin-top: 3px; }
+  .upvote {
+    flex: none; display: flex; flex-direction: column; align-items: center; gap: 1px;
+    font: inherit; font-size: 13px; font-weight: 800; color: var(--muted);
+    background: var(--card-2); border: 1.5px solid var(--line);
+    border-radius: 9px; padding: 6px 11px; cursor: pointer; height: fit-content;
+    font-variant-numeric: tabular-nums;
+  }
+  .upvote.on { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+  .composer { display: flex; gap: 9px; margin-bottom: 6px; }
+  .composer input { flex: 1; }
+  .composer .btn { width: auto; margin: 0; padding-inline: 18px; flex: none; }
+
+  footer { text-align: center; color: var(--muted); font-size: 12px; padding-top: 26px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1 id="room-title">PollRoom</h1>
+    <span class="live-pill idle" id="live-pill"><span class="dot"></span><span id="live-text">Waiting</span></span>
+  </header>
+
+  <div class="banner" id="demo-banner" hidden>
+    <strong>Demo mode.</strong> This is fake local data. Add your Supabase keys to
+    <code>config.js</code> to go live.
+  </div>
+
+  <div id="poll-area"></div>
+
+  <div id="comments-block" hidden>
+    <div class="section-h"><h2>Room chat</h2></div>
+    <div class="card">
+      <div class="composer">
+        <input type="text" id="chat-input" maxlength="280" placeholder="Say something to the room…">
+        <button class="btn" id="chat-send">Send</button>
+      </div>
+      <div class="err" id="chat-err" hidden></div>
+      <div id="chat-feed"></div>
+    </div>
+  </div>
+
+  <footer>PollRoom · live audience voting</footer>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="config.js"></script>
+<script src="shared.js"></script>
+<script>
+(function () {
+  "use strict";
+  const { api, configured, lsGet, lsSet, COLORS, timeAgo, esc } = window.PollRoom;
+
+  const $ = (id) => document.getElementById(id);
+  $("demo-banner").hidden = configured;
+
+  // ------- local per-device memory -------
+  let myVotes = lsGet("pr_my_votes", {});     // pollId -> [option_idx]
+  let myWords = lsGet("pr_my_words", {});     // pollId -> [words]
+  let myUps = lsGet("pr_my_upvotes", {});     // messageId -> true
+
+  // ------- state -------
+  let room = null, polls = [], counts = null, messages = [];
+  let pendingSel = [];        // choice selection before submit
+  let viewingResults = {};    // pollId -> bool (voted, showing results)
+  let renderedPollId = null, renderedMode = null;
+
+  async function refresh() {
+    try {
+      const [r, p, m] = await Promise.all([api.getRoom(), api.getPolls(), api.getMessages()]);
+      room = r; polls = p; messages = m;
+      const active = activePoll();
+      counts = active ? await api.getCounts(active.id) : null;
+      render();
+    } catch (e) {
+      console.error("refresh failed", e);
+    }
+  }
+
+  function activePoll() {
+    return room && room.active_poll_id ? polls.find((p) => p.id === room.active_poll_id) : null;
+  }
+
+  // ------- render -------
+  function render() {
+    document.title = room.title || "PollRoom";
+    $("room-title").textContent = room.title || "PollRoom";
+    const poll = activePoll();
+
+    const pill = $("live-pill");
+    pill.classList.toggle("idle", !poll);
+    $("live-text").textContent = poll ? "Live" : "Waiting";
+
+    renderPoll(poll);
+    renderChat();
+  }
+
+  function renderPoll(poll) {
+    const area = $("poll-area");
+    if (!poll) {
+      if (renderedMode !== "waiting") {
+        area.innerHTML =
+          '<div class="card waiting">' +
+          '<div class="dot-row"><i></i><i></i><i></i></div>' +
+          '<div class="big">Hang tight</div>' +
+          "<p>The next poll will appear here the moment it goes live.</p>" +
+          "</div>";
+        renderedMode = "waiting";
+        renderedPollId = null;
+      }
+      return;
+    }
+
+    const voted =
+      (poll.type === "choice" && (viewingResults[poll.id] || (myVotes[poll.id] || []).length)) ||
+      (poll.type === "words" && (viewingResults[poll.id] || (myWords[poll.id] || []).length));
+    const mode = poll.type + (voted ? ":results" : ":vote");
+
+    if (poll.type === "open") { renderOpenPoll(poll, area); return; }
+
+    if (renderedPollId !== poll.id || renderedMode !== mode) {
+      renderedPollId = poll.id;
+      renderedMode = mode;
+      if (poll.type === "choice") voted ? buildChoiceResults(poll, area) : buildChoiceVote(poll, area);
+      else voted ? buildWordResults(poll, area) : buildWordVote(poll, area);
+    }
+    if (voted) updateResults(poll);
+  }
+
+  // --- choice: voting ---
+  function buildChoiceVote(poll, area) {
+    pendingSel = (myVotes[poll.id] || []).slice();
+    const multi = poll.allow_multiple;
+    area.innerHTML =
+      '<div class="card">' +
+      '<p class="poll-q">' + esc(poll.title) + "</p>" +
+      '<p class="poll-meta">' + (multi ? "Select all that apply" : "Pick one") + "</p>" +
+      '<div class="opts">' +
+      poll.options.map((o, i) =>
+        '<button class="opt' + (multi ? " multi" : "") + (pendingSel.includes(i) ? " sel" : "") + '" data-i="' + i + '">' +
+        '<span class="tick">' + (pendingSel.includes(i) ? "✓" : "") + "</span><span>" + esc(o) + "</span></button>"
+      ).join("") +
+      "</div>" +
+      '<button class="btn" id="vote-btn"' + (pendingSel.length ? "" : " disabled") + ">Submit vote</button>" +
+      '<div class="err" id="vote-err" hidden></div>' +
+      "</div>";
+
+    area.querySelectorAll(".opt").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const i = +btn.dataset.i;
+        if (multi) {
+          pendingSel = pendingSel.includes(i) ? pendingSel.filter((x) => x !== i) : pendingSel.concat(i);
+        } else {
+          pendingSel = [i];
+        }
+        area.querySelectorAll(".opt").forEach((b) => {
+          const on = pendingSel.includes(+b.dataset.i);
+          b.classList.toggle("sel", on);
+          b.querySelector(".tick").textContent = on ? "✓" : "";
+        });
+        $("vote-btn").disabled = !pendingSel.length;
+      });
+    });
+
+    $("vote-btn").addEventListener("click", async () => {
+      const btn = $("vote-btn");
+      btn.disabled = true; btn.textContent = "Sending…";
+      try {
+        await api.castVote(poll.id, pendingSel);
+        myVotes[poll.id] = pendingSel.slice(); lsSet("pr_my_votes", myVotes);
+        viewingResults[poll.id] = true;
+        refresh();
+      } catch (e) {
+        btn.disabled = false; btn.textContent = "Submit vote";
+        const el = $("vote-err"); el.hidden = false; el.textContent = e.message;
+      }
+    });
+  }
+
+  // --- choice: results ---
+  function buildChoiceResults(poll, area) {
+    area.innerHTML =
+      '<div class="card">' +
+      '<p class="poll-q">' + esc(poll.title) + "</p>" +
+      '<p class="poll-meta">Live results — you voted' +
+      ((myVotes[poll.id] || []).length ? ": " + esc((myVotes[poll.id] || []).map((i) => poll.options[i]).join(", ")) : "") +
+      "</p>" +
+      '<div class="bars" id="res-bars"></div>' +
+      '<div class="respondents" id="res-n"></div>' +
+      '<button class="btn ghost" id="change-btn">Change my vote</button>' +
+      "</div>";
+    $("change-btn").addEventListener("click", () => {
+      viewingResults[poll.id] = false;
+      renderedMode = null;
+      renderPoll(poll);
+    });
+  }
+
+  function buildWordVote(poll, area) {
+    area.innerHTML =
+      '<div class="card">' +
+      '<p class="poll-q">' + esc(poll.title) + "</p>" +
+      '<p class="poll-meta">Up to 3 words — separate with commas</p>' +
+      '<input type="text" id="words-input" maxlength="140" placeholder="e.g. energized, curious">' +
+      '<p class="hint">Everyone’s words build a live cloud on screen.</p>' +
+      '<button class="btn" id="words-btn">Add my words</button>' +
+      '<div class="err" id="words-err" hidden></div>' +
+      "</div>";
+    $("words-btn").addEventListener("click", async () => {
+      const words = $("words-input").value.split(",").map((w) => w.trim()).filter(Boolean).slice(0, 3);
+      if (!words.length) return;
+      const btn = $("words-btn");
+      btn.disabled = true; btn.textContent = "Sending…";
+      try {
+        await api.submitWords(poll.id, words);
+        myWords[poll.id] = words; lsSet("pr_my_words", myWords);
+        viewingResults[poll.id] = true;
+        refresh();
+      } catch (e) {
+        btn.disabled = false; btn.textContent = "Add my words";
+        const el = $("words-err"); el.hidden = false; el.textContent = e.message;
+      }
+    });
+    $("words-input").addEventListener("keydown", (e) => { if (e.key === "Enter") $("words-btn").click(); });
+  }
+
+  function buildWordResults(poll, area) {
+    area.innerHTML =
+      '<div class="card">' +
+      '<p class="poll-q">' + esc(poll.title) + "</p>" +
+      '<p class="poll-meta">Live word cloud</p>' +
+      '<div class="cloud" id="res-cloud"></div>' +
+      '<div class="respondents" id="res-n"></div>' +
+      '<button class="btn ghost" id="change-btn">Change my words</button>' +
+      "</div>";
+    $("change-btn").addEventListener("click", () => {
+      viewingResults[poll.id] = false;
+      renderedMode = null;
+      renderPoll(poll);
+    });
+  }
+
+  function updateResults(poll) {
+    if (!counts) return;
+    const nEl = $("res-n");
+    if (nEl) nEl.textContent = counts.respondents + (counts.respondents === 1 ? " response" : " responses");
+
+    if (poll.type === "choice") {
+      const bars = $("res-bars");
+      if (!bars) return;
+      const byIdx = {};
+      counts.votes.forEach((v) => { byIdx[v.option_idx] = v.n; });
+      const total = Object.values(byIdx).reduce((a, b) => a + b, 0);
+      const max = Math.max(1, ...Object.values(byIdx));
+      bars.innerHTML = poll.options.map((o, i) => {
+        const n = byIdx[i] || 0;
+        const pct = total ? Math.round((n / total) * 100) : 0;
+        return (
+          '<div class="bar-row' + (n === max && n > 0 ? " winner" : "") + '">' +
+          '<div class="bar-label"><span>' + esc(o) + '</span><span class="pct">' + pct + "% · " + n + "</span></div>" +
+          '<div class="bar-track"><div class="bar-fill" style="width:' + (total ? Math.max(1, (n / max) * 100) : 0) + "%;background:" + COLORS[i % COLORS.length] + '"></div></div>' +
+          "</div>"
+        );
+      }).join("");
+    } else if (poll.type === "words") {
+      const cloud = $("res-cloud");
+      if (!cloud) return;
+      const sorted = counts.words.slice().sort((a, b) => b.n - a.n).slice(0, 50);
+      const max = Math.max(1, ...sorted.map((w) => w.n));
+      cloud.innerHTML = sorted.map((w, i) =>
+        '<span style="font-size:' + Math.round(15 + 34 * (w.n / max)) + "px;color:" + COLORS[i % COLORS.length] + '">' + esc(w.word) + "</span>"
+      ).join("") || '<span style="color:var(--muted);font-weight:400;font-size:14px">No words yet — yours will be first.</span>';
+    }
+  }
+
+  // --- open poll: responses + upvotes ---
+  function renderOpenPoll(poll, area) {
+    const mode = "open:" + poll.id;
+    if (renderedMode !== mode || renderedPollId !== poll.id) {
+      renderedMode = mode; renderedPollId = poll.id;
+      area.innerHTML =
+        '<div class="card">' +
+        '<p class="poll-q">' + esc(poll.title) + "</p>" +
+        '<p class="poll-meta">Reply below · tap ▲ to boost answers you like</p>' +
+        '<div class="composer">' +
+        '<input type="text" id="open-input" maxlength="280" placeholder="Type your response…">' +
+        '<button class="btn" id="open-send">Send</button>' +
+        "</div>" +
+        '<div class="err" id="open-err" hidden></div>' +
+        '<div id="open-feed"></div>' +
+        "</div>";
+      $("open-send").addEventListener("click", () => submitMessage("open-input", "open-err", poll.id));
+      $("open-input").addEventListener("keydown", (e) => { if (e.key === "Enter") $("open-send").click(); });
+    }
+    renderFeed($("open-feed"), messages.filter((m) => m.poll_id === poll.id && !m.hidden));
+  }
+
+  // ------- room chat -------
+  function renderChat() {
+    const block = $("comments-block");
+    const open = room.comments_open;
+    const roomMsgs = messages.filter((m) => !m.poll_id && !m.hidden);
+    block.hidden = !open && !roomMsgs.length;
+    if (block.hidden) return;
+    $("chat-input").disabled = !open;
+    $("chat-send").disabled = !open;
+    $("chat-input").placeholder = open ? "Say something to the room…" : "Chat is closed right now";
+    renderFeed($("chat-feed"), roomMsgs);
+  }
+
+  function renderFeed(el, list) {
+    if (!el) return;
+    const focused = document.activeElement;
+    el.innerHTML = list.map((m) =>
+      '<div class="msg">' +
+      '<div class="body">' + esc(m.body) + '<div class="time">' + timeAgo(m.created_at) + "</div></div>" +
+      '<button class="upvote' + (myUps[m.id] ? " on" : "") + '" data-id="' + m.id + '" aria-label="Upvote">▲<span>' + m.upvotes + "</span></button>" +
+      "</div>"
+    ).join("") || '<div class="hint" style="padding-block:8px">Nothing yet — start the conversation.</div>';
+    el.querySelectorAll(".upvote").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        try {
+          const on = await api.toggleUpvote(btn.dataset.id);
+          if (on) myUps[btn.dataset.id] = true; else delete myUps[btn.dataset.id];
+          lsSet("pr_my_upvotes", myUps);
+          refresh();
+        } catch (e) { console.error(e); }
+      });
+    });
+    if (focused && focused.id) { const again = $(focused.id); if (again) again.focus(); }
+  }
+
+  async function submitMessage(inputId, errId, pollId) {
+    const input = $(inputId), err = $(errId);
+    const body = input.value.trim();
+    if (!body) return;
+    err.hidden = true;
+    try {
+      await api.postMessage(body, pollId);
+      input.value = "";
+      refresh();
+    } catch (e) {
+      err.hidden = false; err.textContent = e.message;
+    }
+  }
+
+  $("chat-send").addEventListener("click", () => submitMessage("chat-input", "chat-err", null));
+  $("chat-input").addEventListener("keydown", (e) => { if (e.key === "Enter") $("chat-send").click(); });
+
+  api.onChange(refresh);
+  refresh();
+})();
+</script>
+</body>
+</html>
