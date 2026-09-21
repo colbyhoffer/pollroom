@@ -25,6 +25,7 @@ create table if not exists room_secret (
 create table if not exists sessions (
   id         uuid primary key default gen_random_uuid(),
   name       text not null,
+  theme      text not null default 'default',
   created_at timestamptz not null default now()
 );
 
@@ -319,9 +320,20 @@ declare sid uuid;
 begin
   perform _require_admin(_pass);
   if btrim(coalesce(_name, '')) = '' then raise exception 'session name required'; end if;
-  insert into sessions (name) values (btrim(_name)) returning id into sid;
+  insert into sessions (name, theme)
+    values (btrim(_name),
+            coalesce((select theme from sessions where id = (select active_session_id from room where id = 1)), 'default'))
+    returning id into sid;
   update room set active_session_id = sid, active_poll_id = null, updated_at = now() where id = 1;
   return sid;
+end $$;
+
+create or replace function admin_set_session_theme(_pass text, _id uuid, _theme text)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  perform _require_admin(_pass);
+  if btrim(coalesce(_theme, '')) = '' then raise exception 'theme required'; end if;
+  update sessions set theme = btrim(_theme) where id = _id;
 end $$;
 
 create or replace function admin_set_active_session(_pass text, _id uuid)

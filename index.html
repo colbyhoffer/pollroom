@@ -240,15 +240,15 @@
   let myMsgs = lsGet("pr_my_msgs", {});       // pollId -> [messageId] (to show own responses pre-reveal)
 
   // ------- state -------
-  let room = null, polls = [], counts = null, messages = [];
+  let room = null, polls = [], counts = null, messages = [], sessionsList = [];
   let pendingSel = [];        // choice selection before submit
   let viewingResults = {};    // pollId -> bool (voted, showing results)
   let renderedPollId = null, renderedMode = null;
 
   async function refresh() {
     try {
-      const [r, p, m] = await Promise.all([api.getRoom(), api.getPolls(), api.getMessages()]);
-      room = r; polls = p; messages = m;
+      const [r, p, m, sl] = await Promise.all([api.getRoom(), api.getPolls(), api.getMessages(), api.getSessions()]);
+      room = r; polls = p; messages = m; sessionsList = sl;
       const active = activePoll();
       counts = active ? await api.getCounts(active.id) : null;
       render();
@@ -268,7 +268,8 @@
   // ------- render -------
   let appliedTheme = null;
   function render() {
-    const th = room.theme || "default";
+    const sess = sessionsList.find((sn) => sn.id === room.active_session_id);
+    const th = (sess && sess.theme) || room.theme || "default";
     if (th !== appliedTheme) { appliedTheme = th; window.PollRoom.applyTheme(th); }
     document.title = room.title || "PollRoom";
     $("room-title").textContent = room.title || "PollRoom";

@@ -92,6 +92,10 @@
       s.messages.forEach((m) => { m.session_id = sid; });
       lsSet(DEMO_KEY, s);
     }
+    if (s.sessions.some((sn) => !sn.theme)) {
+      s.sessions.forEach((sn) => { if (!sn.theme) sn.theme = s.room.theme || "default"; });
+      lsSet(DEMO_KEY, s);
+    }
     return s;
   }
   function demoSave(s) {
@@ -219,6 +223,7 @@
     api.getPresenceCount = () => presenceCount;
     api.onPresence = (fn) => presenceCbs.push(fn);
     api.createSession = async (pass, name) => { const id = await rpc("admin_create_session", { _pass: pass, _name: name }); ping(); return id; };
+    api.setSessionTheme = async (pass, id, theme) => { await rpc("admin_set_session_theme", { _pass: pass, _id: id, _theme: theme }); ping(); };
     api.setActiveSession = async (pass, id) => { await rpc("admin_set_active_session", { _pass: pass, _id: id }); ping(); };
     api.renameSession = async (pass, id, name) => { await rpc("admin_rename_session", { _pass: pass, _id: id, _name: name }); ping(); };
     api.deleteSession = async (pass, id) => { await rpc("admin_delete_session", { _pass: pass, _id: id }); ping(); };
@@ -356,11 +361,18 @@
         if (n !== last) { last = n; try { fn(n); } catch (e) {} }
       }, 5000);
     };
+    api.setSessionTheme = async (_pass, id, theme) => {
+      const s = demoLoad();
+      const sess = s.sessions.find((x) => x.id === id);
+      if (sess && theme && theme.trim()) sess.theme = theme.trim();
+      demoSave(s);
+    };
     api.createSession = async (_pass, name) => {
       const s = demoLoad();
       if (!name || !name.trim()) throw new Error("session name required");
+      const cur = s.sessions.find((x) => x.id === s.room.active_session_id);
       const id = uuid();
-      s.sessions.push({ id, name: name.trim(), created_at: new Date().toISOString() });
+      s.sessions.push({ id, name: name.trim(), theme: (cur && cur.theme) || "default", created_at: new Date().toISOString() });
       s.room.active_session_id = id;
       s.room.active_poll_id = null;
       demoSave(s);

@@ -532,7 +532,8 @@
   // ---------- render ----------
   let appliedTheme = null;
   function render() {
-    const th = room.theme || "default";
+    const activeSess = sessionsList.find((sn) => sn.id === room.active_session_id);
+    const th = (activeSess && activeSess.theme) || room.theme || "default";
     if (th !== appliedTheme) { appliedTheme = th; window.PollRoom.applyTheme(th); }
     const themeSel = $("theme-select");
     if (document.activeElement !== themeSel) {
@@ -827,7 +828,7 @@
 
   $("room-title-input").addEventListener("change", guard(() => api.setRoom(pass, { title: $("room-title-input").value })));
   $("comments-toggle").addEventListener("change", guard(() => api.setRoom(pass, { comments_open: $("comments-toggle").checked })));
-  $("theme-select").addEventListener("change", guard(() => api.setRoom(pass, { theme: $("theme-select").value })));
+  $("theme-select").addEventListener("change", guard(() => api.setSessionTheme(pass, room.active_session_id, $("theme-select").value)));
   $("copy-link").addEventListener("click", async () => {
     try {
       await navigator.clipboard.writeText(audienceUrl());
