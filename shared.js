@@ -212,7 +212,7 @@
     api.setRevealed = async (pass, id, revealed) => { await rpc("admin_set_revealed", { _pass: pass, _id: id, _revealed: revealed }); ping(); };
     api.deletePoll = async (pass, id) => { await rpc("admin_delete_poll", { _pass: pass, _id: id }); ping(); };
     api.setActive = async (pass, id) => { await rpc("admin_set_active", { _pass: pass, _poll: id }); ping(); };
-    api.setRoom = async (pass, { title, comments_open }) => { await rpc("admin_set_room", { _pass: pass, _title: title ?? null, _comments_open: comments_open ?? null }); ping(); };
+    api.setRoom = async (pass, { title, comments_open, theme }) => { await rpc("admin_set_room", { _pass: pass, _title: title ?? null, _comments_open: comments_open ?? null, _theme: theme ?? null }); ping(); };
     api.hideMessage = async (pass, id, hidden) => { await rpc("admin_hide_message", { _pass: pass, _id: id, _hidden: hidden }); ping(); };
     api.resetPoll = async (pass, id) => { await rpc("admin_reset_poll", { _pass: pass, _id: id }); ping(); };
     api.trackPresence = () => { wantTrack = true; if (channelReady) pingChannel.track({ t: Date.now() }).catch(() => {}); };
@@ -415,10 +415,11 @@
       }
       demoSave(s);
     };
-    api.setRoom = async (_pass, { title, comments_open }) => {
+    api.setRoom = async (_pass, { title, comments_open, theme }) => {
       const s = demoLoad();
       if (title != null && title.trim()) s.room.title = title.trim();
       if (comments_open != null) s.room.comments_open = comments_open;
+      if (theme != null && theme.trim()) s.room.theme = theme.trim();
       demoSave(s);
     };
     api.hideMessage = async (_pass, id, hidden) => {
@@ -438,6 +439,41 @@
 
   api.onChange = (fn) => listeners.push(fn);
 
+  // ---------------------------------------------------------------
+  // Themes: applies a registry entry from themes.js to the page
+  // ---------------------------------------------------------------
+  const COLORS = ["#FF7A2E", "#43C6AC", "#F2C94C", "#6C9BF2", "#E86AA6", "#9B7BF2", "#57B75E", "#E05B5B"];
+  const VAR_MAP = {
+    bg: "--bg", card: "--card", card2: "--card-2", line: "--line",
+    text: "--text", textSoft: "--text-soft", muted: "--muted",
+    accent: "--accent", accentSoft: "--accent-soft", accentFaint: "--accent-faint",
+    accentEdge: "--accent-edge", accentContrast: "--accent-contrast",
+    good: "--good", danger: "--danger",
+  };
+  let themeQR = { dark: "#10141b", light: "#ffffff" };
+  function applyTheme(name) {
+    const reg = window.POLLROOM_THEMES || {};
+    const t = reg[name] || reg["default"];
+    if (!t) return;
+    const root = document.documentElement.style;
+    Object.entries(VAR_MAP).forEach(([key, cssVar]) => {
+      if (t.vars && t.vars[key]) root.setProperty(cssVar, t.vars[key]);
+    });
+    if (t.font && t.font.family) root.setProperty("--font", t.font.family);
+    if (t.font && t.font.googleFonts && !document.querySelector('link[data-theme-font="' + name + '"]')) {
+      const link = document.createElement("link");
+      link.rel = "stylesheet";
+      link.href = t.font.googleFonts;
+      link.setAttribute("data-theme-font", name);
+      document.head.appendChild(link);
+    }
+    if (Array.isArray(t.ramp) && t.ramp.length) {
+      COLORS.length = 0;
+      t.ramp.forEach((c) => COLORS.push(c));
+    }
+    themeQR = t.qr || { dark: "#10141b", light: "#ffffff" };
+  }
+
   window.PollRoom = {
     api,
     deviceId,
@@ -445,7 +481,9 @@
     lsGet,
     lsSet,
     uuid,
-    COLORS: ["#FF7A2E", "#43C6AC", "#F2C94C", "#6C9BF2", "#E86AA6", "#9B7BF2", "#57B75E", "#E05B5B"],
+    COLORS,
+    applyTheme,
+    qrColors: () => themeQR,
     timeAgo(iso) {
       const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
       if (s < 60) return "just now";

@@ -14,6 +14,7 @@ create table if not exists room (
   title         text not null default 'PollRoom',
   active_poll_id uuid,
   comments_open boolean not null default true,
+  theme         text not null default 'default',
   updated_at    timestamptz not null default now()
 );
 
@@ -376,13 +377,14 @@ begin
   end if;
 end $$;
 
-create or replace function admin_set_room(_pass text, _title text, _comments_open boolean)
+create or replace function admin_set_room(_pass text, _title text, _comments_open boolean, _theme text default null)
 returns void language plpgsql security definer set search_path = public as $$
 begin
   perform _require_admin(_pass);
   update room set
     title = coalesce(nullif(btrim(_title), ''), title),
     comments_open = coalesce(_comments_open, comments_open),
+    theme = coalesce(nullif(btrim(_theme), ''), theme),
     updated_at = now()
     where id = 1;
 end $$;

@@ -17,7 +17,12 @@
     --muted: #8b96a5;
     --accent: #ff7a2e;
     --accent-soft: rgba(255, 122, 46, 0.14);
+    --accent-faint: rgba(255, 122, 46, 0.10);
+    --accent-edge: rgba(255, 122, 46, 0.4);
+    --accent-contrast: #17110c;
     --danger: #e05b5b;
+    --good: #43c6ac;
+    --text-soft: #b9c2ce;
     --radius: 14px;
     --font: "Archivo", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   }
@@ -39,7 +44,7 @@
   button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
   .btn {
-    font-weight: 800; background: var(--accent); color: #17110c; border: none;
+    font-weight: 800; background: var(--accent); color: var(--accent-contrast); border: none;
     border-radius: 10px; padding: 10px 18px; transition: filter 0.12s;
   }
   .btn:hover { filter: brightness(1.08); }
@@ -114,7 +119,7 @@
     flex: none; font-size: 10.5px; font-weight: 800; letter-spacing: 0.07em; text-transform: uppercase;
     padding: 3px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted);
   }
-  .tag.live { color: var(--accent); border-color: rgba(255,122,46,0.5); background: var(--accent-soft); }
+  .tag.live { color: var(--accent); border-color: var(--accent-edge); background: var(--accent-soft); }
 
   .field { margin-bottom: 14px; }
   .field label { display: block; font-size: 12.5px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); margin-bottom: 6px; }
@@ -144,7 +149,7 @@
   .msg .meta { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 
   .banner {
-    background: var(--accent-soft); border: 1px solid rgba(255,122,46,0.35);
+    background: var(--accent-soft); border: 1px solid var(--accent-edge);
     border-radius: var(--radius); padding: 10px 14px; font-size: 13.5px; margin-bottom: 14px;
   }
   .banner strong { color: var(--accent); }
@@ -172,7 +177,7 @@
     background: transparent; border: 1px solid var(--line); border-radius: 999px;
     padding: 4px 11px; cursor: pointer;
   }
-  .chip.on { color: #17110c; background: var(--accent); border-color: var(--accent); font-weight: 700; }
+  .chip.on { color: var(--accent-contrast); background: var(--accent); border-color: var(--accent); font-weight: 700; }
   .chips { display: flex; gap: 6px; }
   .sees-pill {
     display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600;
@@ -223,14 +228,14 @@
     background: var(--card-2); border-radius: 999px; padding: clamp(6px, 1vh, 10px) clamp(14px, 1.6vw, 22px);
     font-variant-numeric: tabular-nums;
   }
-  #stage .stage-resp.top1 { background: rgba(255, 122, 46, 0.10); border-color: var(--accent); }
-  #stage .stage-resp.top1 .rank { background: var(--accent); color: #17110c; }
-  #stage .stage-resp.top1 .rvotes { color: var(--accent); background: rgba(255, 122, 46, 0.14); }
+  #stage .stage-resp.top1 { background: var(--accent-faint); border-color: var(--accent); }
+  #stage .stage-resp.top1 .rank { background: var(--accent); color: var(--accent-contrast); }
+  #stage .stage-resp.top1 .rvotes { color: var(--accent); background: var(--accent-soft); }
   #stage .stage-resp.anim { animation: msg-in 0.55s cubic-bezier(0.22, 1, 0.36, 1) both; }
   @media (prefers-reduced-motion: reduce) { #stage .stage-resp.anim { animation: none; } }
   #stage .stage-progress { display: flex; flex-direction: column; align-items: center; gap: 8px; }
   #stage .stage-progress .dots { display: flex; gap: 9px; }
-  #stage .stage-progress .dots i { width: 10px; height: 10px; border-radius: 50%; background: #3a4557; }
+  #stage .stage-progress .dots i { width: 10px; height: 10px; border-radius: 50%; background: var(--line); }
   #stage .stage-progress .dots i.on { background: var(--accent); }
   #stage .stage-progress .plabel { font-size: clamp(12px, 1.3vw, 15px); font-weight: 600; color: var(--muted); }
   #stage .join-big { display: flex; align-items: center; justify-content: center; gap: 5vw; flex-wrap: wrap; }
@@ -245,7 +250,7 @@
     font-size: clamp(15px, 1.6vw, 18px); font-weight: 700;
     background: var(--card); border: 1px solid var(--line); border-radius: 999px; padding: 9px 16px;
   }
-  #stage .joined-pill .dot2 { width: 10px; height: 10px; border-radius: 50%; background: #43c6ac; }
+  #stage .joined-pill .dot2 { width: 10px; height: 10px; border-radius: 50%; background: var(--good); }
   #stage-exit { position: absolute; top: 14px; right: 16px; }
   #stage-reveal { position: absolute; top: 14px; right: 116px; }
   .stage-timer {
@@ -300,6 +305,9 @@
         <div class="row" style="margin-top:10px">
           <button class="btn ghost sm" id="rename-session">Rename</button>
           <button class="btn ghost sm" id="delete-session">Delete</button>
+        </div>
+        <div class="field" style="margin:14px 0 0"><label for="theme-select">Theme</label>
+          <select id="theme-select" title="Restyles audience phones, this console, and the stage"></select>
         </div>
       </div>
     </div>
@@ -406,12 +414,14 @@
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="themes.js"></script>
 <script src="config.js"></script>
 <script src="shared.js"></script>
 <script>
 (function () {
   "use strict";
   const { api, configured, COLORS, timeAgo, esc } = window.PollRoom;
+  const PollRoom = window.PollRoom;
   const $ = (id) => document.getElementById(id);
 
   let pass = null;
@@ -520,7 +530,16 @@
   }
 
   // ---------- render ----------
+  let appliedTheme = null;
   function render() {
+    const th = room.theme || "default";
+    if (th !== appliedTheme) { appliedTheme = th; window.PollRoom.applyTheme(th); }
+    const themeSel = $("theme-select");
+    if (document.activeElement !== themeSel) {
+      themeSel.innerHTML = Object.entries(window.POLLROOM_THEMES || {}).map(([key, t]) =>
+        '<option value="' + key + '"' + (key === th ? " selected" : "") + ">" + esc(t.name || key) + "</option>"
+      ).join("");
+    }
     if (document.activeElement !== $("room-title-input")) $("room-title-input").value = room.title || "";
     $("comments-toggle").checked = !!room.comments_open;
 
@@ -808,6 +827,7 @@
 
   $("room-title-input").addEventListener("change", guard(() => api.setRoom(pass, { title: $("room-title-input").value })));
   $("comments-toggle").addEventListener("change", guard(() => api.setRoom(pass, { comments_open: $("comments-toggle").checked })));
+  $("theme-select").addEventListener("change", guard(() => api.setRoom(pass, { theme: $("theme-select").value })));
   $("copy-link").addEventListener("click", async () => {
     try {
       await navigator.clipboard.writeText(audienceUrl());
@@ -903,7 +923,7 @@
     const url = audienceUrl();
     $("stage-url").textContent = url.replace(/^https?:\/\//, "");
     $("qr").innerHTML = "";
-    if (window.QRCode) qr = new QRCode($("qr"), { text: url, width: 110, height: 110, colorDark: "#10141b", colorLight: "#ffffff" });
+    if (window.QRCode) qr = new QRCode($("qr"), { text: url, width: 110, height: 110, colorDark: PollRoom.qrColors().dark, colorLight: PollRoom.qrColors().light });
     if (document.documentElement.requestFullscreen) document.documentElement.requestFullscreen().catch(() => {});
     renderStage();
   }
@@ -992,7 +1012,7 @@
           '<div class="hint2">' + (nPolls ? nPolls + (nPolls === 1 ? " poll" : " polls") + " · " : "") + "anonymous · no app needed</div>" +
           '<div class="joined-pill" id="stage-joined" hidden><span class="dot2"></span><span id="stage-joined-n"></span></div>' +
           "</div></div>";
-        if (window.QRCode) new QRCode($("stage-qr-big"), { text: audienceUrl(), width: 300, height: 300, colorDark: "#10141b", colorLight: "#ffffff" });
+        if (window.QRCode) new QRCode($("stage-qr-big"), { text: audienceUrl(), width: 300, height: 300, colorDark: PollRoom.qrColors().dark, colorLight: PollRoom.qrColors().light });
       }
       updateJoined(api.getPresenceCount ? api.getPresenceCount() : 0);
       return;

@@ -17,7 +17,11 @@
     --muted: #8b96a5;
     --accent: #ff7a2e;
     --accent-soft: rgba(255, 122, 46, 0.14);
+    --accent-faint: rgba(255, 122, 46, 0.10);
+    --accent-edge: rgba(255, 122, 46, 0.4);
+    --accent-contrast: #17110c;
     --good: #43c6ac;
+    --text-soft: #b9c2ce;
     --radius: 14px;
     --font: "Archivo", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   }
@@ -51,7 +55,7 @@
     display: inline-flex; align-items: center; gap: 7px; flex: none;
     font-size: 12px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase;
     color: var(--accent); background: var(--accent-soft);
-    border: 1px solid rgba(255, 122, 46, 0.35);
+    border: 1px solid var(--accent-edge);
     padding: 5px 11px; border-radius: 999px;
   }
   .live-pill .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); animation: pulse 1.6s ease-in-out infinite; }
@@ -61,7 +65,7 @@
   @media (prefers-reduced-motion: reduce) { .live-pill .dot { animation: none; } }
 
   .banner {
-    background: var(--accent-soft); border: 1px solid rgba(255,122,46,0.35);
+    background: var(--accent-soft); border: 1px solid var(--accent-edge);
     color: var(--text); border-radius: var(--radius);
     padding: 10px 14px; font-size: 13.5px; margin-bottom: 14px;
   }
@@ -72,7 +76,7 @@
     border-radius: var(--radius); padding: 18px; margin-bottom: 16px;
   }
   .poll-q { font-size: 20px; font-weight: 800; letter-spacing: -0.01em; margin: 0 0 4px; text-wrap: balance; }
-  .poll-sub { font-size: 14px; font-weight: 600; color: #b9c2ce; margin: 0 0 4px; }
+  .poll-sub { font-size: 14px; font-weight: 600; color: var(--text-soft); margin: 0 0 4px; }
   .poll-meta { color: var(--muted); font-size: 13px; margin-bottom: 14px; }
 
   .opts { display: flex; flex-direction: column; gap: 9px; }
@@ -91,11 +95,11 @@
     font-size: 12px; color: var(--muted); font-weight: 800;
   }
   .opt.multi .tick { border-radius: 7px; }
-  .opt.sel .tick { background: var(--accent); border-color: var(--accent); color: #17110c; }
+  .opt.sel .tick { background: var(--accent); border-color: var(--accent); color: var(--accent-contrast); }
 
   .btn {
     font: inherit; font-weight: 800; letter-spacing: 0.01em;
-    background: var(--accent); color: #17110c; border: none;
+    background: var(--accent); color: var(--accent-contrast); border: none;
     border-radius: 11px; padding: 13px 22px; cursor: pointer; width: 100%;
     margin-top: 14px; transition: filter 0.12s;
   }
@@ -218,6 +222,7 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="themes.js"></script>
 <script src="config.js"></script>
 <script src="shared.js"></script>
 <script>
@@ -261,7 +266,10 @@
   }
 
   // ------- render -------
+  let appliedTheme = null;
   function render() {
+    const th = room.theme || "default";
+    if (th !== appliedTheme) { appliedTheme = th; window.PollRoom.applyTheme(th); }
     document.title = room.title || "PollRoom";
     $("room-title").textContent = room.title || "PollRoom";
     const poll = activePoll();
