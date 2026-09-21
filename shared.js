@@ -83,6 +83,15 @@
   function demoLoad() {
     let s = lsGet(DEMO_KEY, null);
     if (!s || !s.room) { s = demoSeed(); lsSet(DEMO_KEY, s); }
+    if (!s.sessions) {
+      // migrate older demo stores to the sessions model
+      const sid = uuid();
+      s.sessions = [{ id: sid, name: "Demo Event", created_at: new Date().toISOString() }];
+      s.room.active_session_id = sid;
+      s.polls.forEach((p) => { p.session_id = sid; });
+      s.messages.forEach((m) => { m.session_id = sid; });
+      lsSet(DEMO_KEY, s);
+    }
     return s;
   }
   function demoSave(s) {
@@ -149,6 +158,11 @@
       if (error) fail(error);
       return data;
     };
+    api.getSessions = async () => {
+      const { data, error } = await sb.from("sessions").select("*").order("created_at");
+      if (error) fail(error);
+      return data;
+    };
     api.getCounts = async (pollId) => {
       const [vc, wc, rc] = await Promise.all([
         sb.from("vote_counts").select("*").eq("poll_id", pollId),
@@ -182,6 +196,10 @@
     api.setRoom = async (pass, { title, comments_open }) => { await rpc("admin_set_room", { _pass: pass, _title: title ?? null, _comments_open: comments_open ?? null }); ping(); };
     api.hideMessage = async (pass, id, hidden) => { await rpc("admin_hide_message", { _pass: pass, _id: id, _hidden: hidden }); ping(); };
     api.resetPoll = async (pass, id) => { await rpc("admin_reset_poll", { _pass: pass, _id: id }); ping(); };
+    api.createSession = async (pass, name) => { const id = await rpc("admin_create_session", { _pass: pass, _name: name }); ping(); return id; };
+    api.setActiveSession = async (pass, id) => { await rpc("admin_set_active_session", { _pass: pass, _id: id }); ping(); };
+    api.renameSession = async (pass, id, name) => { await rpc("admin_rename_session", { _pass: pass, _id: id, _name: name }); ping(); };
+    api.deleteSession = async (pass, id) => { await rpc("admin_delete_session", { _pass: pass, _id: id }); ping(); };
   } else {
     // ------- demo implementations -------
     const activeGuard = (s, pollId) => {
@@ -189,6 +207,7 @@
     };
     api.getRoom = async () => demoLoad().room;
     api.getPolls = async () => demoLoad().polls.slice().sort((a, b) => a.position - b.position);
+    api.getSessions = async () => demoLoad().sessions.slice().sort((a, b) => (a.created_at < b.created_at ? -1 : 1));
     api.getCounts = async (pollId) => {
       const s = demoLoad();
       const votes = {};
@@ -232,7 +251,10 @@
       if (!pollId && !s.room.comments_open) throw new Error("comments are closed");
       if (pollId) activeGuard(s, pollId);
       const id = uuid();
-      s.messages.push({ id, poll_id: pollId || null, device_id: deviceId, body: b, hidden: false, created_at: new Date().toISOString() });
+      const sid = pollId
+        ? (s.polls.find((p) => p.id === pollId) || {}).session_id
+        : s.room.active_session_id;
+      s.messages.push({ id, poll_id: pollId || null, session_id: sid, device_id: deviceId, body: b, hidden: false, created_at: new Date().toISOString() });
       demoSave(s);
       return id;
     };
@@ -271,7 +293,7 @@
         return p.id;
       }
       const id = uuid();
-      s.polls.push({ id, title: p.title.trim(), type: p.type, options: p.options || [], allow_multiple: !!p.allow_multiple, revealed: false, max_upvotes: lim, position: s.polls.length });
+      s.polls.push({ id, title: p.title.trim(), type: p.type, options: p.options || [], allow_multiple: !!p.allow_multiple, revealed: false, max_upvotes: lim, position: s.polls.length, session_id: s.room.active_session_id });
       demoSave(s);
       return id;
     };
@@ -279,6 +301,47 @@
       const s = demoLoad();
       const p = s.polls.find((x) => x.id === id);
       if (p) p.revealed = revealed;
+      demoSave(s);
+    };
+    api.createSession = async (_pass, name) => {
+      const s = demoLoad();
+      if (!name || !name.trim()) throw new Error("session name required");
+      const id = uuid();
+      s.sessions.push({ id, name: name.trim(), created_at: new Date().toISOString() });
+      s.room.active_session_id = id;
+      s.room.active_poll_id = null;
+      demoSave(s);
+      return id;
+    };
+    api.setActiveSession = async (_pass, id) => {
+      const s = demoLoad();
+      if (!s.sessions.find((x) => x.id === id)) throw new Error("no such session");
+      s.room.active_session_id = id;
+      s.room.active_poll_id = null;
+      demoSave(s);
+    };
+    api.renameSession = async (_pass, id, name) => {
+      const s = demoLoad();
+      if (!name || !name.trim()) throw new Error("session name required");
+      const sess = s.sessions.find((x) => x.id === id);
+      if (sess) sess.name = name.trim();
+      demoSave(s);
+    };
+    api.deleteSession = async (_pass, id) => {
+      const s = demoLoad();
+      if (s.sessions.length <= 1) throw new Error("cannot delete the only session");
+      s.sessions = s.sessions.filter((x) => x.id !== id);
+      const deadPolls = new Set(s.polls.filter((p) => p.session_id === id).map((p) => p.id));
+      s.polls = s.polls.filter((p) => p.session_id !== id);
+      s.votes = s.votes.filter((v) => !deadPolls.has(v.poll_id));
+      s.words = s.words.filter((w) => !deadPolls.has(w.poll_id));
+      const deadMsgs = new Set(s.messages.filter((m) => m.session_id === id).map((m) => m.id));
+      s.messages = s.messages.filter((m) => m.session_id !== id);
+      s.upvotes = s.upvotes.filter((u) => !deadMsgs.has(u.message_id));
+      if (s.room.active_session_id === id) {
+        s.room.active_session_id = s.sessions[s.sessions.length - 1].id;
+        s.room.active_poll_id = null;
+      }
       demoSave(s);
     };
     api.deletePoll = async (_pass, id) => {

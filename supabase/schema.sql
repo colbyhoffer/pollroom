@@ -21,8 +21,15 @@ create table if not exists room_secret (
   pass text not null
 );
 
+create table if not exists sessions (
+  id         uuid primary key default gen_random_uuid(),
+  name       text not null,
+  created_at timestamptz not null default now()
+);
+
 create table if not exists polls (
   id             uuid primary key default gen_random_uuid(),
+  session_id     uuid references sessions(id) on delete cascade,
   title          text not null,
   type           text not null check (type in ('choice','words','open')),
   options        jsonb not null default '[]',
@@ -54,6 +61,7 @@ create table if not exists words (
 create table if not exists messages (
   id         uuid primary key default gen_random_uuid(),
   poll_id    uuid references polls(id) on delete cascade,
+  session_id uuid references sessions(id) on delete cascade,
   device_id  uuid not null,
   body       text not null,
   hidden     boolean not null default false,
@@ -66,7 +74,19 @@ create table if not exists upvotes (
   primary key (message_id, device_id)
 );
 
+alter table room add column if not exists active_session_id uuid references sessions(id);
+
 insert into room (id) values (1) on conflict do nothing;
+
+-- start with one session and make it active
+do $$
+declare sid uuid;
+begin
+  if not exists (select 1 from sessions) then
+    insert into sessions (name) values ('First session') returning id into sid;
+    update room set active_session_id = sid where id = 1;
+  end if;
+end $$;
 
 -- >>> CHANGE THIS PASSPHRASE <<<
 insert into room_secret (pass) values ('change-me-before-running');
@@ -78,14 +98,16 @@ insert into room_secret (pass) values ('change-me-before-running');
 
 alter table room        enable row level security;
 alter table room_secret enable row level security;
+alter table sessions    enable row level security;
 alter table polls       enable row level security;
 alter table votes       enable row level security;
 alter table words       enable row level security;
 alter table messages    enable row level security;
 alter table upvotes     enable row level security;
 
-create policy room_read  on room  for select using (true);
-create policy polls_read on polls for select using (true);
+create policy room_read     on room     for select using (true);
+create policy sessions_read on sessions for select using (true);
+create policy polls_read    on polls    for select using (true);
 -- (no policies on the other tables: no direct access)
 
 revoke all on room_secret from anon, authenticated;
@@ -107,7 +129,8 @@ create or replace view respondent_counts with (security_invoker = off) as
 
 create or replace view messages_public with (security_invoker = off) as
   select m.id, m.poll_id, m.body, m.hidden, m.created_at,
-         coalesce(u.n, 0) as upvotes
+         coalesce(u.n, 0) as upvotes,
+         m.session_id
   from messages m
   left join (
     select message_id, count(*)::int as n from upvotes group by 1
@@ -191,6 +214,7 @@ returns uuid language plpgsql security definer set search_path = public as $$
 declare
   b text := btrim(_body);
   p polls;
+  sid uuid;
   new_id uuid;
 begin
   if length(b) < 1 or length(b) > 280 then
@@ -200,13 +224,15 @@ begin
     if not (select comments_open from room where id = 1) then
       raise exception 'comments are closed';
     end if;
+    sid := (select active_session_id from room where id = 1);
   else
     select * into p from polls where id = _poll;
     if p.id is null or p.type <> 'open' then raise exception 'invalid poll'; end if;
     perform _require_active(_poll);
+    sid := p.session_id;
   end if;
-  insert into messages (poll_id, device_id, body)
-    values (_poll, _device, b)
+  insert into messages (poll_id, device_id, body, session_id)
+    values (_poll, _device, b, sid)
     returning id into new_id;
   return new_id;
 end $$;
@@ -256,9 +282,10 @@ begin
     raise exception 'choice polls need at least 2 options';
   end if;
   if _id is null then
-    insert into polls (title, type, options, allow_multiple, max_upvotes, position)
+    insert into polls (title, type, options, allow_multiple, max_upvotes, position, session_id)
       values (btrim(_title), _type, coalesce(_options, '[]'), coalesce(_allow_multiple, false), lim,
-              coalesce((select max(position) + 1 from polls), 0))
+              coalesce((select max(position) + 1 from polls), 0),
+              (select active_session_id from room where id = 1))
       returning id into new_id;
     return new_id;
   end if;
@@ -276,6 +303,51 @@ returns void language plpgsql security definer set search_path = public as $$
 begin
   perform _require_admin(_pass);
   update polls set revealed = _revealed where id = _id;
+end $$;
+
+create or replace function admin_create_session(_pass text, _name text)
+returns uuid language plpgsql security definer set search_path = public as $$
+declare sid uuid;
+begin
+  perform _require_admin(_pass);
+  if btrim(coalesce(_name, '')) = '' then raise exception 'session name required'; end if;
+  insert into sessions (name) values (btrim(_name)) returning id into sid;
+  update room set active_session_id = sid, active_poll_id = null, updated_at = now() where id = 1;
+  return sid;
+end $$;
+
+create or replace function admin_set_active_session(_pass text, _id uuid)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  perform _require_admin(_pass);
+  if not exists (select 1 from sessions where id = _id) then
+    raise exception 'no such session';
+  end if;
+  update room set active_session_id = _id, active_poll_id = null, updated_at = now() where id = 1;
+end $$;
+
+create or replace function admin_rename_session(_pass text, _id uuid, _name text)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  perform _require_admin(_pass);
+  if btrim(coalesce(_name, '')) = '' then raise exception 'session name required'; end if;
+  update sessions set name = btrim(_name) where id = _id;
+end $$;
+
+create or replace function admin_delete_session(_pass text, _id uuid)
+returns void language plpgsql security definer set search_path = public as $$
+declare fallback uuid;
+begin
+  perform _require_admin(_pass);
+  if (select count(*) from sessions) <= 1 then
+    raise exception 'cannot delete the only session';
+  end if;
+  delete from sessions where id = _id;  -- cascades to its polls, votes, messages
+  if (select active_session_id from room where id = 1) is null
+     or not exists (select 1 from sessions where id = (select active_session_id from room where id = 1)) then
+    select id into fallback from sessions order by created_at desc limit 1;
+    update room set active_session_id = fallback, active_poll_id = null, updated_at = now() where id = 1;
+  end if;
 end $$;
 
 create or replace function admin_delete_poll(_pass text, _id uuid)

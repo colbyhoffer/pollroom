@@ -474,7 +474,7 @@
   function renderChat() {
     const block = $("comments-block");
     const open = room.comments_open;
-    const roomMsgs = messages.filter((m) => !m.poll_id && !m.hidden);
+    const roomMsgs = messages.filter((m) => !m.poll_id && !m.hidden && m.session_id === room.active_session_id);
     block.hidden = !open && !roomMsgs.length;
     if (block.hidden) return;
     $("chat-input").disabled = !open;

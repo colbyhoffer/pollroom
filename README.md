@@ -45,4 +45,5 @@ stay in sync, so you can try the whole flow right now.
 
 - **Scale:** Supabase free tier handles 60-70 concurrent easily (realtime allows 200 concurrent connections). Results also refresh every 12s as a fallback, so a missed realtime event never strands anyone.
 - **Security model:** the anon key in `config.js` is public by design. Audience devices can only call the vote/word/message functions (validated server-side, one response per device per poll); all presenter actions are checked against your passphrase inside the database. Raw vote rows and device ids are never readable from the client.
-- **Reuse:** it's one "room". For the next event, just rename the room, delete/reset old polls, or wipe with `admin_reset_poll` per poll.
+- **Sessions:** polls and responses are grouped into named sessions (top of the presenter sidebar). Each event gets its own session; the selected session is what the audience sees. Create the next event's session ahead of time, switch to it on the day, and old events' data stays intact. Export CSV covers the current session.
+- **Migrations:** if you set the database up before a feature existed, run the `supabase/migration-*.sql` files in the SQL Editor (each is safe to re-run).

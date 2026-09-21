@@ -198,6 +198,14 @@
 
   <div class="cols">
     <div>
+      <div class="card" style="margin-bottom:16px">
+        <div class="panel-h"><h2>Session</h2><button class="btn sm" id="new-session">+ New</button></div>
+        <select id="session-select" title="The audience sees the selected session"></select>
+        <div class="row" style="margin-top:10px">
+          <button class="btn ghost sm" id="rename-session">Rename</button>
+          <button class="btn ghost sm" id="delete-session">Delete</button>
+        </div>
+      </div>
       <div class="card">
         <div class="panel-h"><h2>Polls</h2><button class="btn sm" id="new-poll">+ New</button></div>
         <div id="poll-list"></div>
@@ -284,7 +292,7 @@
 
   let pass = null;
   try { pass = sessionStorage.getItem("pr_pass"); } catch (e) {}
-  let room = null, polls = [], counts = null, messages = [];
+  let room = null, polls = [], counts = null, messages = [], sessionsList = [];
   let editing = null;          // poll object being edited, or {id:null,...}
   let selectedId = null;
   let staged = false;
@@ -317,14 +325,16 @@
   async function refresh() {
     if (!pass) return;
     try {
-      const [r, p, m] = await Promise.all([api.getRoom(), api.getPolls(), api.getMessages()]);
-      room = r; polls = p; messages = m;
+      const [r, p, m, sl] = await Promise.all([api.getRoom(), api.getPolls(), api.getMessages(), api.getSessions()]);
+      room = r; polls = p; messages = m; sessionsList = sl;
       const active = activePoll();
       counts = active ? await api.getCounts(active.id) : null;
       render();
     } catch (e) { console.error("refresh failed", e); }
   }
   const activePoll = () => (room && room.active_poll_id ? polls.find((x) => x.id === room.active_poll_id) : null);
+  const sessionPolls = () => polls.filter((p) => room && p.session_id === room.active_session_id);
+  const sessionMessages = () => messages.filter((m) => room && m.session_id === room.active_session_id);
 
   function guard(fn) {
     return async (...args) => {
@@ -338,8 +348,14 @@
     if (document.activeElement !== $("room-title-input")) $("room-title-input").value = room.title || "";
     $("comments-toggle").checked = !!room.comments_open;
 
-    // poll list
-    $("poll-list").innerHTML = polls.map((p) => {
+    // sessions
+    $("session-select").innerHTML = sessionsList.map((sn) =>
+      '<option value="' + sn.id + '"' + (sn.id === room.active_session_id ? " selected" : "") + ">" + esc(sn.name) + "</option>"
+    ).join("");
+    $("delete-session").disabled = sessionsList.length <= 1;
+
+    // poll list (current session only)
+    $("poll-list").innerHTML = sessionPolls().map((p) => {
       const live = room.active_poll_id === p.id;
       const kind = { choice: "Multiple choice", words: "Word cloud", open: "Open response" }[p.type];
       return (
@@ -348,7 +364,7 @@
         (live ? '<span class="tag live">Live</span>' : '<span class="tag">Ready</span>') +
         "</button>"
       );
-    }).join("") || '<div class="hint">No polls yet — create your first one.</div>';
+    }).join("") || '<div class="hint">No polls in this session yet — create one.</div>';
     document.querySelectorAll(".poll-item").forEach((el) => {
       el.addEventListener("click", () => { selectedId = el.dataset.id; openEditor(polls.find((p) => p.id === selectedId)); render(); });
     });
@@ -369,7 +385,7 @@
     const body = $("live-body");
     if (!poll) {
       lastLiveKey = null;
-      const sel = polls.find((p) => p.id === selectedId);
+      const sel = sessionPolls().find((p) => p.id === selectedId);
       body.innerHTML =
         '<div class="hint" style="padding-block:6px">Nothing is live. ' +
         (sel ? 'Push "' + esc(sel.title) + '" live below.' : "Select a poll and push it live.") +
@@ -472,7 +488,7 @@
   // ---------- moderation ----------
   function renderModeration() {
     const feed = $("mod-feed");
-    const list = messages.slice(0, 100);
+    const list = sessionMessages().slice(0, 100);
     feed.innerHTML = list.map((m) => {
       const scope = m.poll_id ? ((polls.find((p) => p.id === m.poll_id) || {}).title || "poll") : "Room chat";
       return (
@@ -495,7 +511,10 @@
     return /[",\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
   }
   async function buildExportCsv() {
-    const [r, ps, ms] = await Promise.all([api.getRoom(), api.getPolls(), api.getMessages()]);
+    const [r, allPolls, allMsgs, sl] = await Promise.all([api.getRoom(), api.getPolls(), api.getMessages(), api.getSessions()]);
+    const sess = sl.find((sn) => sn.id === r.active_session_id);
+    const ps = allPolls.filter((p) => p.session_id === r.active_session_id);
+    const ms = allMsgs.filter((m) => m.session_id === r.active_session_id);
     const rows = [["section", "poll", "item", "count", "created_at", "hidden"]];
     for (const p of ps) {
       if (p.type === "choice") {
@@ -513,8 +532,9 @@
       const pollTitle = m.poll_id ? ((ps.find((p) => p.id === m.poll_id) || {}).title || "") : "";
       rows.push([m.poll_id ? "response" : "chat", pollTitle, m.body, m.upvotes, m.created_at, m.hidden ? "yes" : ""]);
     });
+    const slug = ((sess && sess.name) || "session").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "session";
     return {
-      filename: "pollroom-export-" + new Date().toISOString().slice(0, 10) + ".csv",
+      filename: "pollroom-" + slug + "-" + new Date().toISOString().slice(0, 10) + ".csv",
       csv: rows.map((row) => row.map(csvEsc).join(",")).join("\r\n"),
     };
   }
@@ -535,6 +555,34 @@
     btn.disabled = false; btn.textContent = "Export CSV";
   });
   window.buildExportCsv = buildExportCsv;
+
+  // ---------- sessions ----------
+  $("session-select").addEventListener("change", guard(() => {
+    selectedId = null;
+    $("editor").hidden = true;
+    return api.setActiveSession(pass, $("session-select").value);
+  }));
+  $("new-session").addEventListener("click", guard(() => {
+    const name = prompt("Name for the new session:");
+    if (name == null || !name.trim()) return Promise.resolve();
+    selectedId = null;
+    $("editor").hidden = true;
+    return api.createSession(pass, name);
+  }));
+  $("rename-session").addEventListener("click", guard(() => {
+    const cur = sessionsList.find((sn) => sn.id === room.active_session_id);
+    const name = prompt("Rename session:", cur ? cur.name : "");
+    if (name == null || !name.trim()) return Promise.resolve();
+    return api.renameSession(pass, room.active_session_id, name);
+  }));
+  $("delete-session").addEventListener("click", guard(() => {
+    const cur = sessionsList.find((sn) => sn.id === room.active_session_id);
+    if (!cur) return Promise.resolve();
+    if (!confirm('Delete session "' + cur.name + '" and ALL its polls and responses? This cannot be undone.')) return Promise.resolve();
+    selectedId = null;
+    $("editor").hidden = true;
+    return api.deleteSession(pass, cur.id);
+  }));
 
   $("room-title-input").addEventListener("change", guard(() => api.setRoom(pass, { title: $("room-title-input").value })));
   $("comments-toggle").addEventListener("change", guard(() => api.setRoom(pass, { comments_open: $("comments-toggle").checked })));
@@ -629,11 +677,12 @@
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && staged) exitStage(); });
 
   function stepPoll(dir) {
-    if (!polls.length) return Promise.resolve();
-    const idx = polls.findIndex((p) => p.id === (room && room.active_poll_id));
+    const list = sessionPolls();
+    if (!list.length) return Promise.resolve();
+    const idx = list.findIndex((p) => p.id === (room && room.active_poll_id));
     const to = idx === -1 ? (dir > 0 ? 0 : -1) : idx + dir;
-    if (to < 0 || to >= polls.length) return Promise.resolve();
-    return api.setActive(pass, polls[to].id);
+    if (to < 0 || to >= list.length) return Promise.resolve();
+    return api.setActive(pass, list[to].id);
   }
   $("stage-next").addEventListener("click", guard(() => stepPoll(1)));
   $("stage-prev").addEventListener("click", guard(() => stepPoll(-1)));
@@ -648,9 +697,10 @@
     const sr = $("stage-reveal");
     sr.hidden = !poll || poll.type !== "open";
     if (poll && poll.type === "open") sr.textContent = poll.revealed ? "Hide responses" : "Reveal responses";
-    const idx = polls.findIndex((p) => p.id === (room && room.active_poll_id));
+    const navList = sessionPolls();
+    const idx = navList.findIndex((p) => p.id === (room && room.active_poll_id));
     $("stage-prev").disabled = idx <= 0;
-    $("stage-next").disabled = !polls.length || idx >= polls.length - 1;
+    $("stage-next").disabled = !navList.length || idx >= navList.length - 1;
     if (!poll) {
       $("stage-q").textContent = room.title || "PollRoom";
       $("stage-content").innerHTML = '<div class="waiting-big">Scan the code to join — first poll coming up.</div>';
