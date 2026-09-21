@@ -907,20 +907,30 @@
     if (document.documentElement.requestFullscreen) document.documentElement.requestFullscreen().catch(() => {});
     renderStage();
   }
+  // fresh entries into Present mode start with open-poll responses hidden,
+  // so the reveal moment is never pre-spoiled; Resume keeps state as-is
+  async function hideAllOpenResponses() {
+    const targets = sessionPolls().filter((p) => p.type === "open" && p.revealed);
+    for (const p of targets) await api.setRevealed(pass, p.id, false);
+    if (targets.length) await refresh();
+  }
   $("present-btn").addEventListener("click", async () => {
     const poll = activePoll();
     if (poll) {
       const choice = await dlg({
         title: "Present",
-        message: '"' + poll.title + '" is live right now. Pick up where you left off, or start over from the join screen.',
+        message: '"' + poll.title + '" is live right now. Pick up where you left off, or start over from the join screen with responses hidden.',
         okText: "Resume presentation",
         altText: "Start from beginning",
       });
       if (!choice) return;
       if (choice === "alt") {
-        try { await api.setActive(pass, null); await refresh(); }
+        try { await api.setActive(pass, null); await hideAllOpenResponses(); }
         catch (e) { toast(e.message); return; }
       }
+    } else {
+      try { await hideAllOpenResponses(); }
+      catch (e) { toast(e.message); return; }
     }
     openStage();
   });
