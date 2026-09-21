@@ -56,4 +56,30 @@ window.POLLROOM_THEMES = {
     },
     qr: { dark: "#221f1a", light: "#ffffff" },
   },
+
+  "pre-mortem": {
+    name: "Pre-Mortem",
+    vars: {
+      bg: "#0e1114",
+      card: "#171b20",
+      card2: "#20262c",
+      line: "#3a4046",
+      text: "#e8e1d1",
+      textSoft: "#c9c2b3",
+      muted: "#9aa4ae",
+      accent: "#d9453f",
+      accentSoft: "rgba(217, 69, 63, 0.14)",
+      accentFaint: "rgba(217, 69, 63, 0.08)",
+      accentEdge: "rgba(217, 69, 63, 0.42)",
+      accentContrast: "#ffffff",
+      good: "#7fb069",
+      danger: "#f08c3c",
+    },
+    ramp: ["#d9453f", "#c9973b", "#e8e1d1", "#8fa3c8", "#a3c47a", "#9aa4ae", "#d98cb0", "#7fb3a8"],
+    font: {
+      family: "'Archivo', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+      googleFonts: "https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;800;900&display=swap",
+    },
+    qr: { dark: "#0e1114", light: "#ffffff" },
+  },
 };
