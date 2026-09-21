@@ -334,6 +334,7 @@
     </div>
     <div class="row" style="justify-content:flex-end">
       <button class="btn ghost" id="dlg-cancel">Cancel</button>
+      <button class="btn ghost" id="dlg-alt" hidden></button>
       <button class="btn" id="dlg-ok">OK</button>
     </div>
   </div>
@@ -432,6 +433,7 @@
       if (resolver) { const r = resolver; resolver = null; r(val); }
     }
     $("dlg-cancel").addEventListener("click", () => close(null));
+    $("dlg-alt").addEventListener("click", () => close("alt"));
     $("dlg-ok").addEventListener("click", () => {
       if (!$("dlg-field").hidden) {
         const v = $("dlg-input").value.trim();
@@ -460,6 +462,8 @@
       }
       $("dlg-ok").textContent = opts.okText || "OK";
       $("dlg-ok").classList.toggle("danger-solid", !!opts.danger);
+      $("dlg-alt").hidden = !opts.altText;
+      $("dlg-alt").textContent = opts.altText || "";
       $("dlg").hidden = false;
       if (opts.label != null) setTimeout(() => { $("dlg-input").focus(); $("dlg-input").select(); }, 0);
       return new Promise((res) => { resolver = res; });
@@ -816,7 +820,7 @@
 
   // ---------- big screen ----------
   let qr = null, lastStageKey = null;
-  $("present-btn").addEventListener("click", () => {
+  function openStage() {
     staged = true;
     $("stage").hidden = false;
     const url = audienceUrl();
@@ -825,6 +829,23 @@
     if (window.QRCode) qr = new QRCode($("qr"), { text: url, width: 110, height: 110, colorDark: "#10141b", colorLight: "#ffffff" });
     if (document.documentElement.requestFullscreen) document.documentElement.requestFullscreen().catch(() => {});
     renderStage();
+  }
+  $("present-btn").addEventListener("click", async () => {
+    const poll = activePoll();
+    if (poll) {
+      const choice = await dlg({
+        title: "Present",
+        message: '"' + poll.title + '" is live right now. Pick up where you left off, or start over from the join screen.',
+        okText: "Resume presentation",
+        altText: "Start from beginning",
+      });
+      if (!choice) return;
+      if (choice === "alt") {
+        try { await api.setActive(pass, null); await refresh(); }
+        catch (e) { toast(e.message); return; }
+      }
+    }
+    openStage();
   });
   function exitStage() {
     staged = false;
