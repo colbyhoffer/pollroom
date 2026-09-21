@@ -188,6 +188,7 @@
     <input type="text" id="room-title-input" maxlength="80" title="Room title (click to edit)">
     <span class="spacer"></span>
     <label class="toggle"><span class="switch"><input type="checkbox" id="comments-toggle"><i></i></span> Room chat</label>
+    <button class="btn ghost sm" id="export-btn">Export CSV</button>
     <button class="btn ghost sm" id="copy-link">Copy audience link</button>
     <button class="btn sm" id="present-btn">Present ▸</button>
   </div>
@@ -469,6 +470,53 @@
   }
 
   // ---------- topbar ----------
+  // ---------- export ----------
+  function csvEsc(v) {
+    v = v == null ? "" : String(v);
+    return /[",\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+  }
+  async function buildExportCsv() {
+    const [r, ps, ms] = await Promise.all([api.getRoom(), api.getPolls(), api.getMessages()]);
+    const rows = [["section", "poll", "item", "count", "created_at", "hidden"]];
+    for (const p of ps) {
+      if (p.type === "choice") {
+        const c = await api.getCounts(p.id);
+        const byIdx = {};
+        c.votes.forEach((v) => { byIdx[v.option_idx] = v.n; });
+        p.options.forEach((o, i) => rows.push(["choice", p.title, o, byIdx[i] || 0, "", ""]));
+      } else if (p.type === "words") {
+        const c = await api.getCounts(p.id);
+        c.words.slice().sort((a, b) => b.n - a.n)
+          .forEach((w) => rows.push(["word", p.title, w.word, w.n, "", ""]));
+      }
+    }
+    ms.slice().sort((a, b) => (a.created_at < b.created_at ? -1 : 1)).forEach((m) => {
+      const pollTitle = m.poll_id ? ((ps.find((p) => p.id === m.poll_id) || {}).title || "") : "";
+      rows.push([m.poll_id ? "response" : "chat", pollTitle, m.body, m.upvotes, m.created_at, m.hidden ? "yes" : ""]);
+    });
+    return {
+      filename: "pollroom-export-" + new Date().toISOString().slice(0, 10) + ".csv",
+      csv: rows.map((row) => row.map(csvEsc).join(",")).join("\r\n"),
+    };
+  }
+  $("export-btn").addEventListener("click", async () => {
+    const btn = $("export-btn");
+    btn.disabled = true; btn.textContent = "Exporting…";
+    try {
+      const out = await buildExportCsv();
+      const blob = new Blob(["﻿" + out.csv], { type: "text/csv;charset=utf-8" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = out.filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    } catch (e) { alert(e.message); }
+    btn.disabled = false; btn.textContent = "Export CSV";
+  });
+  window.buildExportCsv = buildExportCsv;
+
   $("room-title-input").addEventListener("change", guard(() => api.setRoom(pass, { title: $("room-title-input").value })));
   $("comments-toggle").addEventListener("change", guard(() => api.setRoom(pass, { comments_open: $("comments-toggle").checked })));
   $("copy-link").addEventListener("click", async () => {
