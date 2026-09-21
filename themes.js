@@ -82,4 +82,40 @@ window.POLLROOM_THEMES = {
     },
     qr: { dark: "#0e1114", light: "#ffffff" },
   },
+
+  "tacenergy": {
+    name: "TACenergy",
+    vars: {
+      bg: "#f4f5f7",                 // cool paper ground, a step off white so cards read as raised
+      card: "#ffffff",               // white panels, like the letterhead
+      card2: "#ededed",              // inputs, option buttons, bar tracks
+      line: "#a7a8a9",               // Cool Gray 6 C as the hairline
+      text: "#1f2937",               // body text, from the document template
+      textSoft: "#4a4f55",
+      muted: "#75787b",              // Cool Gray 9 C: 4.6:1 on white, clears the label rule
+      accent: "#001489",             // Pantone Reflex Blue C
+      accentSoft: "rgba(0, 20, 137, 0.12)",
+      accentFaint: "rgba(0, 20, 137, 0.07)",
+      accentEdge: "rgba(0, 20, 137, 0.42)",
+      accentContrast: "#ffffff",     // 13:1 on Reflex Blue
+      good: "#1d8348",
+      danger: "#c8102e",             // Pantone 186 C, kept for destructive controls so red stays rare
+    },
+    // Every color >= 3.4:1 on the light bg.
+    ramp: [
+      "#001489",  // Reflex Blue (accent)
+      "#c8102e",  // TACenergy red
+      "#1d8348",  // green
+      "#b8740b",  // dark gold
+      "#0f6e7a",  // teal
+      "#6b3fa0",  // plum
+      "#8a4b2a",  // rust
+      "#75787b",  // Cool Gray 9 C
+    ],
+    font: {
+      family: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif",
+      googleFonts: "https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800;900&display=swap",
+    },
+    qr: { dark: "#1f2937", light: "#ffffff" },
+  },
 };
