@@ -37,6 +37,8 @@ create table if not exists polls (
   allow_multiple boolean not null default false,
   revealed       boolean not null default false,  -- open polls: responses shown to audience?
   max_upvotes    int not null default 3,          -- per-person upvote cap on open polls; 0 = no limit
+  timer_seconds  int not null default 0,          -- facilitation countdown shown on stage; 0 = none
+  timer_started_at timestamptz,                   -- stamped each time the poll goes live
   position       int not null default 0,
   created_at     timestamptz not null default now()
 );
@@ -271,12 +273,13 @@ end $$;
 create or replace function admin_save_poll(
   _pass text, _id uuid, _title text, _type text,
   _options jsonb, _allow_multiple boolean, _max_upvotes int default 3,
-  _subtitle text default null
+  _subtitle text default null, _timer_seconds int default 0
 ) returns uuid language plpgsql security definer set search_path = public as $$
 declare
   new_id uuid;
   lim int := greatest(coalesce(_max_upvotes, 3), 0);
   sub text := nullif(btrim(coalesce(_subtitle, '')), '');
+  tmr int := greatest(coalesce(_timer_seconds, 0), 0);
 begin
   perform _require_admin(_pass);
   if btrim(coalesce(_title, '')) = '' then raise exception 'title required'; end if;
@@ -285,8 +288,8 @@ begin
     raise exception 'choice polls need at least 2 options';
   end if;
   if _id is null then
-    insert into polls (title, subtitle, type, options, allow_multiple, max_upvotes, position, session_id)
-      values (btrim(_title), sub, _type, coalesce(_options, '[]'), coalesce(_allow_multiple, false), lim,
+    insert into polls (title, subtitle, type, options, allow_multiple, max_upvotes, timer_seconds, position, session_id)
+      values (btrim(_title), sub, _type, coalesce(_options, '[]'), coalesce(_allow_multiple, false), lim, tmr,
               coalesce((select max(position) + 1 from polls), 0),
               (select active_session_id from room where id = 1))
       returning id into new_id;
@@ -296,7 +299,8 @@ begin
     title = btrim(_title), subtitle = sub, type = _type,
     options = coalesce(_options, '[]'),
     allow_multiple = coalesce(_allow_multiple, false),
-    max_upvotes = lim
+    max_upvotes = lim,
+    timer_seconds = tmr
     where id = _id;
   return _id;
 end $$;
@@ -367,6 +371,9 @@ returns void language plpgsql security definer set search_path = public as $$
 begin
   perform _require_admin(_pass);
   update room set active_poll_id = _poll, updated_at = now() where id = 1;
+  if _poll is not null then
+    update polls set timer_started_at = now() where id = _poll;
+  end if;
 end $$;
 
 create or replace function admin_set_room(_pass text, _title text, _comments_open boolean)
