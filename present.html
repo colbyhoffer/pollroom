@@ -188,6 +188,7 @@
   }
   #stage .head { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; }
   #stage h1 { font-size: clamp(28px, 4.6vw, 58px); font-weight: 900; letter-spacing: -0.02em; margin: 0; max-width: min(72vw, calc(100vw - 340px)); text-wrap: balance; }
+  #stage .stage-sub { font-size: clamp(16px, 1.8vw, 26px); font-weight: 600; color: var(--muted); margin-top: 10px; max-width: min(72vw, calc(100vw - 340px)); }
   #stage .content { flex: 1; display: flex; flex-direction: column; justify-content: center; padding-block: 3vh; min-height: 0; overflow: hidden; }
   #stage .bars { gap: 2.4vh; }
   #stage .bar-row .bar-label { font-size: clamp(16px, 2.2vw, 30px); margin-bottom: 0.8vh; }
@@ -299,6 +300,8 @@
         <div class="panel-h"><h2 id="editor-h">Edit poll</h2></div>
         <div class="field"><label for="ed-title">Question</label>
           <input type="text" id="ed-title" maxlength="200" placeholder="What should we ask the room?"></div>
+        <div class="field"><label for="ed-subtitle">Subtitle · optional</label>
+          <input type="text" id="ed-subtitle" maxlength="200" placeholder="e.g. One reason per response. Past tense."></div>
         <div class="field"><label for="ed-type">Type</label>
           <select id="ed-type">
             <option value="choice">Multiple choice</option>
@@ -369,7 +372,7 @@
 <div id="stage" hidden>
   <button class="btn ghost sm" id="stage-exit">Exit (Esc)</button>
   <button class="btn sm" id="stage-reveal" hidden>Reveal responses</button>
-  <div class="head"><h1 id="stage-q"></h1></div>
+  <div class="head"><div><h1 id="stage-q"></h1><div class="stage-sub" id="stage-sub" hidden></div></div></div>
   <div class="content" id="stage-content"></div>
   <div class="foot">
     <div class="join" id="stage-join-foot">
@@ -570,12 +573,13 @@
     }
     // Rebuild the panel shell only when the poll or reveal state changes, so
     // in-flight reveal animations inside it aren't wiped by routine refreshes.
-    const liveKey = poll.id + ":" + !!poll.revealed + ":" + poll.title;
+    const liveKey = poll.id + ":" + !!poll.revealed + ":" + poll.title + ":" + (poll.subtitle || "");
     const animate = poll.type === "open" && poll.revealed && liveKey !== lastLiveKey && lastLiveKey !== null;
     if (liveKey !== lastLiveKey) {
       lastLiveKey = liveKey;
       body.innerHTML =
-        '<p style="font-size:18px;font-weight:800;margin:0 0 12px">' + esc(poll.title) + "</p>" +
+        '<p style="font-size:18px;font-weight:800;margin:0 0 ' + (poll.subtitle ? "2px" : "12px") + '">' + esc(poll.title) + "</p>" +
+        (poll.subtitle ? '<p class="hint" style="margin:0 0 12px">' + esc(poll.subtitle) + "</p>" : "") +
         (poll.type === "open" && !poll.revealed
           ? '<p class="hint" style="margin:-6px 0 12px">Only you can see these — hidden from the audience until you reveal.</p>'
           : "") +
@@ -808,6 +812,7 @@
     $("editor-h").textContent = poll ? "Edit poll" : "New poll";
     $("ed-delete").hidden = !poll;
     $("ed-title").value = editing.title;
+    $("ed-subtitle").value = editing.subtitle || "";
     $("ed-type").value = editing.type;
     $("ed-multi").checked = !!editing.allow_multiple;
     $("ed-upvotes").value = editing.max_upvotes == null ? "" : String(editing.max_upvotes);
@@ -840,6 +845,7 @@
     const p = {
       id: editing.id,
       title: $("ed-title").value,
+      subtitle: $("ed-subtitle").value.trim(),
       type: $("ed-type").value,
       options: $("ed-type").value === "choice" ? editing.options.map((o) => o.trim()).filter(Boolean) : [],
       allow_multiple: $("ed-multi").checked,
@@ -927,6 +933,7 @@
     $("stage-next").disabled = !navList.length || idx >= navList.length - 1;
     if (!poll) {
       $("stage-q").textContent = "";
+      $("stage-sub").hidden = true;
       $("stage-count").textContent = "";
       $("stage-progress").hidden = true;
       $("stage-join-foot").hidden = true;
@@ -965,6 +972,8 @@
         '<div class="plabel">Poll ' + (pi + 1) + " of " + navList2.length + "</div>";
     }
     $("stage-q").textContent = poll.title;
+    $("stage-sub").hidden = !poll.subtitle;
+    $("stage-sub").textContent = poll.subtitle || "";
     const stageKey = poll.id + ":" + !!poll.revealed;
     const animate = poll.type === "open" && poll.revealed && stageKey !== lastStageKey;
     lastStageKey = stageKey;

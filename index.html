@@ -72,6 +72,7 @@
     border-radius: var(--radius); padding: 18px; margin-bottom: 16px;
   }
   .poll-q { font-size: 20px; font-weight: 800; letter-spacing: -0.01em; margin: 0 0 4px; text-wrap: balance; }
+  .poll-sub { font-size: 14px; font-weight: 600; color: #b9c2ce; margin: 0 0 4px; }
   .poll-meta { color: var(--muted); font-size: 13px; margin-bottom: 14px; }
 
   .opts { display: flex; flex-direction: column; gap: 9px; }
@@ -255,6 +256,10 @@
     return room && room.active_poll_id ? polls.find((p) => p.id === room.active_poll_id) : null;
   }
 
+  function subHtml(poll) {
+    return poll.subtitle ? '<p class="poll-sub">' + esc(poll.subtitle) + "</p>" : "";
+  }
+
   // ------- render -------
   function render() {
     document.title = room.title || "PollRoom";
@@ -297,7 +302,7 @@
     const voted = !dismissed && (
       (poll.type === "choice" && (viewingResults[poll.id] || (myVotes[poll.id] || []).length)) ||
       (poll.type === "words" && (viewingResults[poll.id] || (myWords[poll.id] || []).length)));
-    const mode = poll.type + (voted ? ":results" : ":vote");
+    const mode = poll.type + (voted ? ":results" : ":vote") + ":" + poll.title + ":" + (poll.subtitle || "");
 
     if (poll.type === "open") { renderOpenPoll(poll, area); return; }
 
@@ -317,7 +322,7 @@
     const multi = poll.allow_multiple;
     area.innerHTML =
       '<div class="card">' +
-      '<p class="poll-q">' + esc(poll.title) + "</p>" +
+      '<p class="poll-q">' + esc(poll.title) + "</p>" + subHtml(poll) +
       '<p class="poll-meta">' + (multi ? "Select all that apply" : "Pick one") + "</p>" +
       '<div class="opts">' +
       poll.options.map((o, i) =>
@@ -363,7 +368,7 @@
   function buildChoiceResults(poll, area) {
     area.innerHTML =
       '<div class="card">' +
-      '<p class="poll-q">' + esc(poll.title) + "</p>" +
+      '<p class="poll-q">' + esc(poll.title) + "</p>" + subHtml(poll) +
       '<p class="poll-meta">Live results — you voted' +
       ((myVotes[poll.id] || []).length ? ": " + esc((myVotes[poll.id] || []).map((i) => poll.options[i]).join(", ")) : "") +
       "</p>" +
@@ -382,7 +387,7 @@
     const prev = myWords[poll.id] || [];
     area.innerHTML =
       '<div class="card">' +
-      '<p class="poll-q">' + esc(poll.title) + "</p>" +
+      '<p class="poll-q">' + esc(poll.title) + "</p>" + subHtml(poll) +
       '<p class="poll-meta">One word per box — they join the cloud on screen</p>' +
       [0, 1, 2].map((i) =>
         '<div class="wfield"><label for="word-' + i + '">Word ' + (i + 1) + (i ? " · optional" : "") + "</label>" +
@@ -430,7 +435,7 @@
   function buildWordResults(poll, area) {
     area.innerHTML =
       '<div class="card">' +
-      '<p class="poll-q">' + esc(poll.title) + "</p>" +
+      '<p class="poll-q">' + esc(poll.title) + "</p>" + subHtml(poll) +
       '<p class="poll-meta">Live word cloud</p>' +
       '<div class="cloud" id="res-cloud"></div>' +
       '<div class="respondents" id="res-n"></div>' +
@@ -479,13 +484,13 @@
   // --- open poll: responses + upvotes (hidden until presenter reveals) ---
   function renderOpenPoll(poll, area) {
     const lim = poll.max_upvotes == null ? 3 : poll.max_upvotes;
-    const mode = "open:" + poll.id + ":" + (poll.revealed ? "r" : "h");
+    const mode = "open:" + poll.id + ":" + (poll.revealed ? "r" : "h") + ":" + poll.title + ":" + (poll.subtitle || "");
     const rebuilt = renderedMode !== mode || renderedPollId !== poll.id;
     if (rebuilt) {
       renderedMode = mode; renderedPollId = poll.id;
       area.innerHTML =
         '<div class="card">' +
-        '<p class="poll-q">' + esc(poll.title) + "</p>" +
+        '<p class="poll-q">' + esc(poll.title) + "</p>" + subHtml(poll) +
         '<p class="poll-meta">' + (poll.revealed
           ? "Tap ▲ to boost answers you like" + (lim > 0 ? " (up to " + lim + ")" : "")
           : "Reply below — responses stay hidden until the presenter reveals them") + "</p>" +

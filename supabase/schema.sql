@@ -31,6 +31,7 @@ create table if not exists polls (
   id             uuid primary key default gen_random_uuid(),
   session_id     uuid references sessions(id) on delete cascade,
   title          text not null,
+  subtitle       text,
   type           text not null check (type in ('choice','words','open')),
   options        jsonb not null default '[]',
   allow_multiple boolean not null default false,
@@ -269,11 +270,13 @@ end $$;
 
 create or replace function admin_save_poll(
   _pass text, _id uuid, _title text, _type text,
-  _options jsonb, _allow_multiple boolean, _max_upvotes int default 3
+  _options jsonb, _allow_multiple boolean, _max_upvotes int default 3,
+  _subtitle text default null
 ) returns uuid language plpgsql security definer set search_path = public as $$
 declare
   new_id uuid;
   lim int := greatest(coalesce(_max_upvotes, 3), 0);
+  sub text := nullif(btrim(coalesce(_subtitle, '')), '');
 begin
   perform _require_admin(_pass);
   if btrim(coalesce(_title, '')) = '' then raise exception 'title required'; end if;
@@ -282,15 +285,15 @@ begin
     raise exception 'choice polls need at least 2 options';
   end if;
   if _id is null then
-    insert into polls (title, type, options, allow_multiple, max_upvotes, position, session_id)
-      values (btrim(_title), _type, coalesce(_options, '[]'), coalesce(_allow_multiple, false), lim,
+    insert into polls (title, subtitle, type, options, allow_multiple, max_upvotes, position, session_id)
+      values (btrim(_title), sub, _type, coalesce(_options, '[]'), coalesce(_allow_multiple, false), lim,
               coalesce((select max(position) + 1 from polls), 0),
               (select active_session_id from room where id = 1))
       returning id into new_id;
     return new_id;
   end if;
   update polls set
-    title = btrim(_title), type = _type,
+    title = btrim(_title), subtitle = sub, type = _type,
     options = coalesce(_options, '[]'),
     allow_multiple = coalesce(_allow_multiple, false),
     max_upvotes = lim
