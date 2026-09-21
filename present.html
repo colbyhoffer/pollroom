@@ -859,6 +859,7 @@
     const list = sessionPolls();
     if (!list.length) return Promise.resolve();
     const idx = list.findIndex((p) => p.id === (room && room.active_poll_id));
+    if (dir < 0 && idx === 0) return api.setActive(pass, null); // back to the join screen
     const to = idx === -1 ? (dir > 0 ? 0 : -1) : idx + dir;
     if (to < 0 || to >= list.length) return Promise.resolve();
     return api.setActive(pass, list[to].id);
@@ -878,7 +879,8 @@
     if (poll && poll.type === "open") sr.textContent = poll.revealed ? "Hide responses" : "Reveal responses";
     const navList = sessionPolls();
     const idx = navList.findIndex((p) => p.id === (room && room.active_poll_id));
-    $("stage-prev").disabled = idx <= 0;
+    $("stage-prev").disabled = idx < 0;
+    $("stage-prev").title = idx === 0 ? "Back to join screen (←)" : "Previous poll (←)";
     $("stage-next").disabled = !navList.length || idx >= navList.length - 1;
     if (!poll) {
       $("stage-q").textContent = "";
