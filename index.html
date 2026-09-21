@@ -260,9 +260,12 @@
       return;
     }
 
-    const voted =
+    // viewingResults: true = show results, false = user chose "change my
+    // vote" (don't fall back to vote history), undefined = infer from history
+    const dismissed = viewingResults[poll.id] === false;
+    const voted = !dismissed && (
       (poll.type === "choice" && (viewingResults[poll.id] || (myVotes[poll.id] || []).length)) ||
-      (poll.type === "words" && (viewingResults[poll.id] || (myWords[poll.id] || []).length));
+      (poll.type === "words" && (viewingResults[poll.id] || (myWords[poll.id] || []).length)));
     const mode = poll.type + (voted ? ":results" : ":vote");
 
     if (poll.type === "open") { renderOpenPoll(poll, area); return; }
