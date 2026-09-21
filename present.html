@@ -149,6 +149,38 @@
   }
   .banner strong { color: var(--accent); }
 
+  /* ---- dialogs & toast ---- */
+  #dlg {
+    position: fixed; inset: 0; z-index: 200; background: rgba(6, 9, 14, 0.72);
+    display: grid; place-items: center; padding: 16px;
+  }
+  #dlg .dlg-card {
+    width: 100%; max-width: 420px; background: var(--card); border: 1px solid var(--line);
+    border-radius: 16px; padding: 22px; display: flex; flex-direction: column; gap: 14px;
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
+  }
+  #dlg h3 { margin: 0; font-size: 18px; font-weight: 800; letter-spacing: -0.01em; }
+  .btn.danger-solid { background: var(--danger); color: #fff; border: none; font-weight: 800; }
+  #toast {
+    position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 300;
+    background: var(--card); border: 1px solid var(--danger); color: var(--text);
+    border-radius: 12px; padding: 12px 18px; font-size: 14px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5); max-width: min(520px, 90vw);
+  }
+  .chip {
+    font: inherit; font-size: 12px; font-weight: 600; color: var(--muted);
+    background: transparent; border: 1px solid var(--line); border-radius: 999px;
+    padding: 4px 11px; cursor: pointer;
+  }
+  .chip.on { color: #17110c; background: var(--accent); border-color: var(--accent); font-weight: 700; }
+  .chips { display: flex; gap: 6px; }
+  .sees-pill {
+    display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600;
+    color: var(--muted); background: var(--card); border: 1px solid var(--line);
+    border-radius: 999px; padding: 6px 13px;
+  }
+  .sees-pill .dot3 { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+
   /* ---- big screen mode ---- */
   #stage {
     position: fixed; inset: 0; z-index: 100; background: var(--bg);
@@ -182,6 +214,12 @@
   #stage .join-info .url-big { font-size: clamp(30px, 4.2vw, 54px); font-weight: 900; letter-spacing: -0.02em; color: var(--accent); overflow-wrap: break-word; }
   #stage .join-info .sess { font-size: clamp(18px, 2vw, 26px); font-weight: 800; }
   #stage .join-info .hint2 { font-size: clamp(14px, 1.4vw, 18px); color: var(--muted); }
+  #stage .joined-pill {
+    display: inline-flex; align-items: center; gap: 10px; align-self: flex-start; margin-top: 6px;
+    font-size: clamp(15px, 1.6vw, 18px); font-weight: 700;
+    background: var(--card); border: 1px solid var(--line); border-radius: 999px; padding: 9px 16px;
+  }
+  #stage .joined-pill .dot2 { width: 10px; height: 10px; border-radius: 50%; background: #43c6ac; }
   #stage-exit { position: absolute; top: 14px; right: 16px; }
   #stage-reveal { position: absolute; top: 14px; right: 116px; }
 </style>
@@ -207,6 +245,7 @@
 
   <div class="topbar">
     <input type="text" id="room-title-input" maxlength="80" title="Room title (click to edit)">
+    <span class="sees-pill" id="sees-pill" hidden><span class="dot3"></span><span id="sees-name"></span></span>
     <span class="spacer"></span>
     <label class="toggle"><span class="switch"><input type="checkbox" id="comments-toggle"><i></i></span> Room chat</label>
     <button class="btn ghost sm" id="export-btn">Export CSV</button>
@@ -217,16 +256,16 @@
   <div class="cols">
     <div>
       <div class="card" style="margin-bottom:16px">
+        <div class="panel-h"><h2>Polls</h2><button class="btn sm" id="new-poll">+ New</button></div>
+        <div id="poll-list"></div>
+      </div>
+      <div class="card">
         <div class="panel-h"><h2>Session</h2><button class="btn sm" id="new-session">+ New</button></div>
         <select id="session-select" title="The audience sees the selected session"></select>
         <div class="row" style="margin-top:10px">
           <button class="btn ghost sm" id="rename-session">Rename</button>
           <button class="btn ghost sm" id="delete-session">Delete</button>
         </div>
-      </div>
-      <div class="card">
-        <div class="panel-h"><h2>Polls</h2><button class="btn sm" id="new-poll">+ New</button></div>
-        <div id="poll-list"></div>
       </div>
     </div>
 
@@ -271,12 +310,35 @@
       </div>
 
       <div class="card" id="mod-panel">
-        <div class="panel-h"><h2>Messages &amp; moderation</h2></div>
+        <div class="panel-h"><h2>Messages &amp; moderation</h2>
+          <div class="chips" id="mod-chips">
+            <button class="chip on" data-f="all">All</button>
+            <button class="chip" data-f="chat">Chat</button>
+            <button class="chip" data-f="resp">Responses</button>
+          </div>
+        </div>
         <div id="mod-feed"></div>
       </div>
     </div>
   </div>
 </div>
+
+<div id="dlg" hidden>
+  <div class="dlg-card">
+    <h3 id="dlg-title"></h3>
+    <p class="hint" id="dlg-msg" hidden style="margin:0"></p>
+    <div class="field" id="dlg-field" hidden style="margin:0">
+      <label for="dlg-input" id="dlg-label"></label>
+      <input type="text" id="dlg-input" maxlength="120" autocomplete="off">
+      <p class="hint" id="dlg-hint" hidden style="margin:6px 0 0"></p>
+    </div>
+    <div class="row" style="justify-content:flex-end">
+      <button class="btn ghost" id="dlg-cancel">Cancel</button>
+      <button class="btn" id="dlg-ok">OK</button>
+    </div>
+  </div>
+</div>
+<div id="toast" hidden></div>
 
 <div id="stage" hidden>
   <button class="btn ghost sm" id="stage-exit">Exit (Esc)</button>
@@ -358,8 +420,57 @@
   function guard(fn) {
     return async (...args) => {
       try { await fn(...args); await refresh(); }
-      catch (e) { alert(e.message); }
+      catch (e) { toast(e.message); }
     };
+  }
+
+  // ---------- styled dialogs & toast (replace native prompt/confirm/alert) ----------
+  const dlg = (() => {
+    let resolver = null;
+    function close(val) {
+      $("dlg").hidden = true;
+      if (resolver) { const r = resolver; resolver = null; r(val); }
+    }
+    $("dlg-cancel").addEventListener("click", () => close(null));
+    $("dlg-ok").addEventListener("click", () => {
+      if (!$("dlg-field").hidden) {
+        const v = $("dlg-input").value.trim();
+        if (!v) { $("dlg-input").focus(); return; }
+        close(v);
+      } else {
+        close(true);
+      }
+    });
+    $("dlg").addEventListener("mousedown", (e) => { if (e.target === $("dlg")) close(null); });
+    document.addEventListener("keydown", (e) => {
+      if ($("dlg").hidden) return;
+      if (e.key === "Escape") close(null);
+      if (e.key === "Enter" && !$("dlg-field").hidden) $("dlg-ok").click();
+    });
+    return function open(opts) {
+      $("dlg-title").textContent = opts.title;
+      $("dlg-msg").hidden = !opts.message;
+      $("dlg-msg").textContent = opts.message || "";
+      $("dlg-field").hidden = opts.label == null;
+      if (opts.label != null) {
+        $("dlg-label").textContent = opts.label;
+        $("dlg-input").value = opts.value || "";
+        $("dlg-hint").hidden = !opts.hint;
+        $("dlg-hint").textContent = opts.hint || "";
+      }
+      $("dlg-ok").textContent = opts.okText || "OK";
+      $("dlg-ok").classList.toggle("danger-solid", !!opts.danger);
+      $("dlg").hidden = false;
+      if (opts.label != null) setTimeout(() => { $("dlg-input").focus(); $("dlg-input").select(); }, 0);
+      return new Promise((res) => { resolver = res; });
+    };
+  })();
+  function toast(msg) {
+    const t = $("toast");
+    t.textContent = msg;
+    t.hidden = false;
+    clearTimeout(t._tm);
+    t._tm = setTimeout(() => { t.hidden = true; }, 4000);
   }
 
   // ---------- render ----------
@@ -372,6 +483,9 @@
       '<option value="' + sn.id + '"' + (sn.id === room.active_session_id ? " selected" : "") + ">" + esc(sn.name) + "</option>"
     ).join("");
     $("delete-session").disabled = sessionsList.length <= 1;
+    const curSess = sessionsList.find((sn) => sn.id === room.active_session_id);
+    $("sees-pill").hidden = sessionsList.length < 2 || !curSess;
+    if (curSess) $("sees-name").textContent = "Audience sees: " + curSess.name;
 
     // poll list (current session only)
     $("poll-list").innerHTML = sessionPolls().map((p) => {
@@ -508,17 +622,29 @@
   $("stage-reveal").addEventListener("click", toggleReveal);
 
   $("end-btn").addEventListener("click", guard(() => api.setActive(pass, null)));
-  $("reset-btn").addEventListener("click", guard(() => {
+  $("reset-btn").addEventListener("click", guard(async () => {
     const poll = activePoll();
     if (!poll) return;
-    if (!confirm('Clear all responses for "' + poll.title + '"?')) return Promise.resolve();
-    return api.resetPoll(pass, poll.id);
+    const ok = await dlg({ title: "Reset responses?", message: 'Clears every response to "' + poll.title + '". Voters can answer again.', okText: "Reset responses", danger: true });
+    if (!ok) return;
+    await api.resetPoll(pass, poll.id);
   }));
 
   // ---------- moderation ----------
+  let modFilter = "all";
+  document.querySelectorAll("#mod-chips .chip").forEach((c) => {
+    c.addEventListener("click", () => {
+      modFilter = c.dataset.f;
+      document.querySelectorAll("#mod-chips .chip").forEach((x) => x.classList.toggle("on", x === c));
+      renderModeration();
+    });
+  });
+
   function renderModeration() {
     const feed = $("mod-feed");
-    const list = sessionMessages().slice(0, 100);
+    const list = sessionMessages()
+      .filter((m) => modFilter === "all" || (modFilter === "chat" ? !m.poll_id : !!m.poll_id))
+      .slice(0, 100);
     feed.innerHTML = list.map((m) => {
       const scope = m.poll_id ? ((polls.find((p) => p.id === m.poll_id) || {}).title || "poll") : "Room chat";
       return (
@@ -592,26 +718,27 @@
     $("editor").hidden = true;
     return api.setActiveSession(pass, $("session-select").value);
   }));
-  $("new-session").addEventListener("click", guard(() => {
-    const name = prompt("Name for the new session:");
-    if (name == null || !name.trim()) return Promise.resolve();
+  $("new-session").addEventListener("click", guard(async () => {
+    const name = await dlg({ title: "New session", label: "Session name", hint: "Creates an empty set of polls and switches the room to it. Your other sessions keep their results.", okText: "Create session" });
+    if (!name) return;
     selectedId = null;
     $("editor").hidden = true;
-    return api.createSession(pass, name);
+    await api.createSession(pass, name);
   }));
-  $("rename-session").addEventListener("click", guard(() => {
+  $("rename-session").addEventListener("click", guard(async () => {
     const cur = sessionsList.find((sn) => sn.id === room.active_session_id);
-    const name = prompt("Rename session:", cur ? cur.name : "");
-    if (name == null || !name.trim()) return Promise.resolve();
-    return api.renameSession(pass, room.active_session_id, name);
+    const name = await dlg({ title: "Rename session", label: "Session name", value: cur ? cur.name : "", okText: "Rename" });
+    if (!name) return;
+    await api.renameSession(pass, room.active_session_id, name);
   }));
-  $("delete-session").addEventListener("click", guard(() => {
+  $("delete-session").addEventListener("click", guard(async () => {
     const cur = sessionsList.find((sn) => sn.id === room.active_session_id);
-    if (!cur) return Promise.resolve();
-    if (!confirm('Delete session "' + cur.name + '" and ALL its polls and responses? This cannot be undone.')) return Promise.resolve();
+    if (!cur) return;
+    const ok = await dlg({ title: 'Delete "' + cur.name + '"?', message: "Deletes all of this session's polls and responses. This cannot be undone.", okText: "Delete session", danger: true });
+    if (!ok) return;
     selectedId = null;
     $("editor").hidden = true;
-    return api.deleteSession(pass, cur.id);
+    await api.deleteSession(pass, cur.id);
   }));
 
   $("room-title-input").addEventListener("change", guard(() => api.setRoom(pass, { title: $("room-title-input").value })));
@@ -678,12 +805,13 @@
       refresh();
     } catch (e) { const el = $("ed-err"); el.hidden = false; el.textContent = e.message; }
   });
-  $("ed-delete").addEventListener("click", guard(() => {
-    if (!confirm("Delete this poll and all its responses?")) return Promise.resolve();
+  $("ed-delete").addEventListener("click", guard(async () => {
+    const ok = await dlg({ title: "Delete this poll?", message: "The poll and all of its responses are removed for good.", okText: "Delete poll", danger: true });
+    if (!ok) return;
     $("editor").hidden = true;
     const id = editing.id;
     if (selectedId === id) selectedId = null;
-    return api.deletePoll(pass, id);
+    await api.deletePoll(pass, id);
   }));
 
   // ---------- big screen ----------
@@ -704,7 +832,7 @@
     if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
   }
   $("stage-exit").addEventListener("click", exitStage);
-  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && staged) exitStage(); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && staged && $("dlg").hidden) exitStage(); });
 
   function stepPoll(dir) {
     const list = sessionPolls();
@@ -749,9 +877,11 @@
           '<div class="url-big">' + esc(audienceUrl().replace(/^https?:\/\//, "")) + "</div>" +
           '<div class="sess">' + esc(room.title || "PollRoom") + "</div>" +
           '<div class="hint2">' + (nPolls ? nPolls + (nPolls === 1 ? " poll" : " polls") + " tonight · " : "") + "anonymous · no app needed</div>" +
+          '<div class="joined-pill" id="stage-joined" hidden><span class="dot2"></span><span id="stage-joined-n"></span></div>' +
           "</div></div>";
         if (window.QRCode) new QRCode($("stage-qr-big"), { text: audienceUrl(), width: 300, height: 300, colorDark: "#10141b", colorLight: "#ffffff" });
       }
+      updateJoined(api.getPresenceCount ? api.getPresenceCount() : 0);
       return;
     }
     $("stage-join-foot").hidden = false;
@@ -771,8 +901,36 @@
     const animate = poll.type === "open" && poll.revealed && stageKey !== lastStageKey;
     lastStageKey = stageKey;
     renderResults(poll, counts, $("stage-content"), null, true, animate);
-    const n = respondentCount(poll, counts);
-    $("stage-count").textContent = n + (n === 1 ? " response" : " responses");
+    setStageCount(respondentCount(poll, counts));
+  }
+
+  function updateJoined(n) {
+    const pill = $("stage-joined");
+    if (!pill) return;
+    pill.hidden = n < 1;
+    $("stage-joined-n").textContent = n + " in the room";
+  }
+  if (api.onPresence) api.onPresence((n) => { if (staged && !activePoll()) updateJoined(n); });
+
+  // count the response number up instead of jumping, so votes landing feel live
+  let stageCountShown = 0, stageCountAnim = null;
+  function setStageCount(n) {
+    const el = $("stage-count");
+    const label = (v) => v + (v === 1 ? " response" : " responses");
+    if (n === stageCountShown || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      stageCountShown = n;
+      el.textContent = label(n);
+      return;
+    }
+    const from = stageCountShown, t0 = performance.now(), dur = 600;
+    stageCountShown = n;
+    cancelAnimationFrame(stageCountAnim);
+    const step = (t) => {
+      const k = Math.min(1, (t - t0) / dur);
+      el.textContent = label(Math.round(from + (n - from) * (1 - Math.pow(1 - k, 3))));
+      if (k < 1) stageCountAnim = requestAnimationFrame(step);
+    };
+    stageCountAnim = requestAnimationFrame(step);
   }
 
   api.onChange(refresh);

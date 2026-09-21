@@ -123,6 +123,11 @@
   .cloud { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: baseline; justify-content: center; padding: 14px 0 6px; }
   .cloud span { font-weight: 800; line-height: 1.1; letter-spacing: -0.01em; }
 
+  .wfield { display: flex; flex-direction: column; gap: 5px; margin-bottom: 9px; }
+  .wfield label { font-size: 11px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; color: var(--muted); }
+  .mini-cloud { margin-top: 16px; border-top: 1px solid var(--line); padding-top: 12px; }
+  .mini-cloud-h { font-size: 11px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; color: var(--muted); margin-bottom: 2px; }
+  .charcount { color: var(--muted); font-size: 12px; text-align: right; margin-top: 4px; font-variant-numeric: tabular-nums; }
   input[type=text], textarea {
     width: 100%; font: inherit; color: var(--text);
     background: var(--card-2); border: 1.5px solid var(--line);
@@ -202,6 +207,7 @@
         <input type="text" id="chat-input" maxlength="280" placeholder="Say something to the room…">
         <button class="btn" id="chat-send">Send</button>
       </div>
+      <div class="charcount" id="chat-count" hidden></div>
       <div class="err" id="chat-err" hidden></div>
       <div id="chat-feed"></div>
     </div>
@@ -302,6 +308,7 @@
       else voted ? buildWordResults(poll, area) : buildWordVote(poll, area);
     }
     if (voted) updateResults(poll);
+    else if (poll.type === "words") updateWordPreview();
   }
 
   // --- choice: voting ---
@@ -372,17 +379,23 @@
   }
 
   function buildWordVote(poll, area) {
+    const prev = myWords[poll.id] || [];
     area.innerHTML =
       '<div class="card">' +
       '<p class="poll-q">' + esc(poll.title) + "</p>" +
-      '<p class="poll-meta">Up to 3 words — separate with commas</p>' +
-      '<input type="text" id="words-input" maxlength="140" placeholder="e.g. energized, curious">' +
-      '<p class="hint">Everyone’s words build a live cloud on screen.</p>' +
+      '<p class="poll-meta">One word per box — they join the cloud on screen</p>' +
+      [0, 1, 2].map((i) =>
+        '<div class="wfield"><label for="word-' + i + '">Word ' + (i + 1) + (i ? " · optional" : "") + "</label>" +
+        '<input type="text" id="word-' + i + '" maxlength="40" autocomplete="off" autocapitalize="none" value="' + esc(prev[i] || "") + '" placeholder="' + (i ? "Add another" : "e.g. energized") + '"></div>'
+      ).join("") +
       '<button class="btn" id="words-btn">Add my words</button>' +
       '<div class="err" id="words-err" hidden></div>' +
-      "</div>";
+      '<div class="mini-cloud" id="mini-cloud" hidden>' +
+      '<div class="mini-cloud-h">Live on the big screen</div>' +
+      '<div class="cloud" id="mini-cloud-words" style="padding:8px 0 2px"></div>' +
+      "</div></div>";
     $("words-btn").addEventListener("click", async () => {
-      const words = $("words-input").value.split(",").map((w) => w.trim()).filter(Boolean).slice(0, 3);
+      const words = [0, 1, 2].map((i) => $("word-" + i).value.trim()).filter(Boolean);
       if (!words.length) return;
       const btn = $("words-btn");
       btn.disabled = true; btn.textContent = "Sending…";
@@ -396,7 +409,22 @@
         const el = $("words-err"); el.hidden = false; el.textContent = e.message;
       }
     });
-    $("words-input").addEventListener("keydown", (e) => { if (e.key === "Enter") $("words-btn").click(); });
+    [0, 1, 2].forEach((i) => {
+      $("word-" + i).addEventListener("keydown", (e) => { if (e.key === "Enter") $("words-btn").click(); });
+    });
+    updateWordPreview();
+  }
+
+  function updateWordPreview() {
+    const box = $("mini-cloud"), el = $("mini-cloud-words");
+    if (!box || !el || !counts) return;
+    const sorted = counts.words.slice().sort((a, b) => b.n - a.n).slice(0, 8);
+    box.hidden = !sorted.length;
+    if (!sorted.length) return;
+    const max = Math.max(1, ...sorted.map((w) => w.n));
+    el.innerHTML = sorted.map((w, i) =>
+      '<span style="font-size:' + Math.round(13 + 14 * (w.n / max)) + "px;color:" + COLORS[i % COLORS.length] + '">' + esc(w.word) + "</span>"
+    ).join("");
   }
 
   function buildWordResults(poll, area) {
@@ -465,6 +493,7 @@
         '<input type="text" id="open-input" maxlength="280" placeholder="Type your response…">' +
         '<button class="btn" id="open-send">Send</button>' +
         "</div>" +
+        '<div class="charcount" id="open-count" hidden></div>' +
         '<div class="err" id="open-err" hidden></div>' +
         '<div class="hint" id="open-note" style="padding-block:8px" hidden></div>' +
         '<div id="open-feed"></div>' +
@@ -559,7 +588,30 @@
   $("chat-send").addEventListener("click", () => submitMessage("chat-input", "chat-err", null));
   $("chat-input").addEventListener("keydown", (e) => { if (e.key === "Enter") $("chat-send").click(); });
 
+  // show a counter as messages approach the 280-character cap
+  function wireCounter(inputId, countId) {
+    const input = $(inputId), count = $(countId);
+    if (!input || !count) return;
+    input.addEventListener("input", () => {
+      const len = input.value.length;
+      count.hidden = len <= 200;
+      count.textContent = len + " / 280";
+    });
+  }
+  wireCounter("chat-input", "chat-count");
+  document.addEventListener("input", (e) => {
+    if (e.target && e.target.id === "open-input") {
+      const count = $("open-count");
+      if (count) {
+        const len = e.target.value.length;
+        count.hidden = len <= 200;
+        count.textContent = len + " / 280";
+      }
+    }
+  });
+
   api.onChange(refresh);
+  if (api.trackPresence) api.trackPresence();
   refresh();
 })();
 </script>

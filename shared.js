@@ -112,13 +112,25 @@
   }
 
   let sb = null, pingChannel = null, channelReady = false;
+  let presenceCount = 0, wantTrack = false;
+  const presenceCbs = [];
+  function firePresence() {
+    presenceCbs.forEach((fn) => { try { fn(presenceCount); } catch (e) {} });
+  }
 
   if (configured) {
     sb = window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY);
-    pingChannel = sb.channel("pollroom");
+    pingChannel = sb.channel("pollroom", { config: { presence: { key: deviceId } } });
     pingChannel
       .on("broadcast", { event: "ping" }, () => changed())
-      .subscribe((status) => { channelReady = status === "SUBSCRIBED"; });
+      .on("presence", { event: "sync" }, () => {
+        presenceCount = Object.keys(pingChannel.presenceState()).length;
+        firePresence();
+      })
+      .subscribe((status) => {
+        channelReady = status === "SUBSCRIBED";
+        if (channelReady && wantTrack) pingChannel.track({ t: Date.now() }).catch(() => {});
+      });
     // Safety net: refresh every 12s even if a broadcast is missed.
     setInterval(changed, 12000);
   } else {
@@ -203,6 +215,9 @@
     api.setRoom = async (pass, { title, comments_open }) => { await rpc("admin_set_room", { _pass: pass, _title: title ?? null, _comments_open: comments_open ?? null }); ping(); };
     api.hideMessage = async (pass, id, hidden) => { await rpc("admin_hide_message", { _pass: pass, _id: id, _hidden: hidden }); ping(); };
     api.resetPoll = async (pass, id) => { await rpc("admin_reset_poll", { _pass: pass, _id: id }); ping(); };
+    api.trackPresence = () => { wantTrack = true; if (channelReady) pingChannel.track({ t: Date.now() }).catch(() => {}); };
+    api.getPresenceCount = () => presenceCount;
+    api.onPresence = (fn) => presenceCbs.push(fn);
     api.createSession = async (pass, name) => { const id = await rpc("admin_create_session", { _pass: pass, _name: name }); ping(); return id; };
     api.setActiveSession = async (pass, id) => { await rpc("admin_set_active_session", { _pass: pass, _id: id }); ping(); };
     api.renameSession = async (pass, id, name) => { await rpc("admin_rename_session", { _pass: pass, _id: id, _name: name }); ping(); };
@@ -319,6 +334,25 @@
       const p = s.polls.find((x) => x.id === id);
       if (p) p.revealed = revealed;
       demoSave(s);
+    };
+    const PRES_KEY = "pr_demo_presence";
+    const presFresh = () => {
+      const m = lsGet(PRES_KEY, {});
+      const now = Date.now();
+      return Object.values(m).filter((t) => now - t < 15000).length;
+    };
+    api.trackPresence = () => {
+      const beat = () => { const m = lsGet(PRES_KEY, {}); m[deviceId] = Date.now(); lsSet(PRES_KEY, m); };
+      beat();
+      setInterval(beat, 5000);
+    };
+    api.getPresenceCount = () => presFresh();
+    api.onPresence = (fn) => {
+      let last = -1;
+      setInterval(() => {
+        const n = presFresh();
+        if (n !== last) { last = n; try { fn(n); } catch (e) {} }
+      }, 5000);
     };
     api.createSession = async (_pass, name) => {
       const s = demoLoad();
