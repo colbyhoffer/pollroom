@@ -202,6 +202,31 @@
   #stage .stage-right { display: flex; flex-direction: column; align-items: flex-end; gap: 10px; }
   #stage .stage-nav { display: flex; gap: 8px; }
   #stage .waiting-big { text-align: center; color: var(--muted); font-size: clamp(20px, 3vw, 40px); font-weight: 700; }
+  #stage .stage-resp-list { display: flex; flex-direction: column; gap: 1.6vh; }
+  #stage .stage-resp {
+    display: flex; align-items: center; gap: clamp(14px, 1.6vw, 24px);
+    background: var(--card); border: 1.5px solid var(--line); border-radius: 14px;
+    padding: clamp(12px, 1.6vh, 18px) clamp(16px, 1.8vw, 26px);
+  }
+  #stage .stage-resp .rank {
+    flex: none; width: clamp(34px, 3.2vw, 46px); height: clamp(34px, 3.2vw, 46px);
+    border-radius: 50%; background: var(--card-2); color: var(--muted);
+    display: grid; place-items: center; font-weight: 900; font-size: clamp(16px, 1.7vw, 22px);
+  }
+  #stage .stage-resp .rbody {
+    flex: 1; min-width: 0; overflow-wrap: break-word;
+    font-size: clamp(18px, 2.2vw, 30px); font-weight: 600;
+  }
+  #stage .stage-resp .rvotes {
+    flex: none; font-size: clamp(17px, 1.9vw, 26px); font-weight: 800; color: var(--muted);
+    background: var(--card-2); border-radius: 999px; padding: clamp(6px, 1vh, 10px) clamp(14px, 1.6vw, 22px);
+    font-variant-numeric: tabular-nums;
+  }
+  #stage .stage-resp.top1 { background: rgba(255, 122, 46, 0.10); border-color: var(--accent); }
+  #stage .stage-resp.top1 .rank { background: var(--accent); color: #17110c; }
+  #stage .stage-resp.top1 .rvotes { color: var(--accent); background: rgba(255, 122, 46, 0.14); }
+  #stage .stage-resp.anim { animation: msg-in 0.55s cubic-bezier(0.22, 1, 0.36, 1) both; }
+  @media (prefers-reduced-motion: reduce) { #stage .stage-resp.anim { animation: none; } }
   #stage .stage-progress { display: flex; flex-direction: column; align-items: center; gap: 8px; }
   #stage .stage-progress .dots { display: flex; gap: 9px; }
   #stage .stage-progress .dots i { width: 10px; height: 10px; border-radius: 50%; background: #3a4557; }
@@ -596,19 +621,37 @@
         '<span style="font-size:' + Math.round(base + spread * (w.n / max)) + "px;color:" + COLORS[i % COLORS.length] + '">' + esc(w.word) + "</span>"
       ).join("") || '<span style="color:var(--muted);font-weight:400">Waiting for words…</span>') + "</div>";
     } else {
-      const list = messages.filter((m) => m.poll_id === poll.id && !m.hidden)
-        .sort((a, b) => b.upvotes - a.upvotes).slice(0, stage ? 8 : 30);
+      const listAll = messages.filter((m) => m.poll_id === poll.id && !m.hidden)
+        .sort((a, b) => b.upvotes - a.upvotes);
       if (stage && !poll.revealed) {
-        const n = messages.filter((m) => m.poll_id === poll.id && !m.hidden).length;
         el._sig = null;
-        el.innerHTML = '<div class="waiting-big">' + n + (n === 1 ? " response" : " responses") +
+        el.innerHTML = '<div class="waiting-big">' + listAll.length + (listAll.length === 1 ? " response" : " responses") +
           " locked in — answer on your phone.</div>";
         return;
       }
+      if (stage) {
+        // ranked big-screen list: top 5 numbered, leader highlighted, counts readable from the back
+        const list = listAll.slice(0, 6);
+        const maxUp = list.length ? list[0].upvotes : 0;
+        const row = (m, anim, i) =>
+          '<div class="stage-resp' + (maxUp > 0 && i === 0 && m.upvotes > 0 ? " top1" : "") + (anim ? " anim" : "") + '"' +
+          (anim ? ' style="animation-delay:' + i * 130 + 'ms"' : "") + ">" +
+          (maxUp > 0 && i < 5 ? '<span class="rank">' + (i + 1) + "</span>" : "") +
+          '<span class="rbody">' + esc(m.body) + "</span>" +
+          '<span class="rvotes">▲ ' + m.upvotes + "</span>" +
+          "</div>";
+        const sig = list.map((m, i) => row(m, false, i)).join("") || '<div class="hint">Waiting for responses…</div>';
+        if (!animate && el._sig === sig) return;
+        el._sig = sig;
+        el.innerHTML = '<div class="stage-resp-list">' +
+          (animate ? (list.map((m, i) => row(m, true, i)).join("") || sig) : sig) + "</div>";
+        return;
+      }
+      const list = listAll.slice(0, 30);
       const row = (m, anim, i) =>
         '<div class="msg' + (anim ? " anim" : "") + '"' +
-        (anim ? ' style="animation-delay:' + i * (stage ? 130 : 70) + 'ms"' : "") + ">" +
-        '<div class="body"' + (stage ? ' style="font-size:clamp(16px,2vw,28px);font-weight:600"' : "") + ">" + esc(m.body) + "</div>" +
+        (anim ? ' style="animation-delay:' + i * 70 + 'ms"' : "") + ">" +
+        '<div class="body">' + esc(m.body) + "</div>" +
         '<div class="meta">▲ ' + m.upvotes + "</div></div>";
       // Skip identical re-renders so the reveal cascade isn't wiped mid-flight
       const sig = list.map((m) => row(m, false, 0)).join("") || '<div class="hint">Waiting for responses…</div>';
