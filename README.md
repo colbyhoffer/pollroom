@@ -1,6 +1,6 @@
 # PollRoom
 
-Your own Poll Everywhere: live multiple-choice polls, word clouds, open
+Your own live polling web app: live multiple-choice polls, word clouds, open
 Q&A with upvoting, and a moderated room chat — built for a room of 60-70
 phones. Static frontend (host anywhere, e.g. GitHub Pages) + a free
 Supabase project for the live data. No servers to run, $0/month.
