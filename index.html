@@ -244,10 +244,24 @@
   let room = null, polls = [], countsById = {}, messages = [], sessionsList = [];
   let viewingResults = {};    // pollId -> bool (voted, showing results)
 
+  // ?s=<slug> pins this page to one session; without it the page follows
+  // whatever session the presenter has active
+  const urlSessionParam = new URLSearchParams(location.search).get("s");
+  let scopeSession = null, pinned = false;
+
+  function resolveScope() {
+    const vs = urlSessionParam
+      ? sessionsList.find((x) => x.slug === urlSessionParam || x.id === urlSessionParam)
+      : null;
+    pinned = !!(vs && room && vs.id !== room.active_session_id);
+    scopeSession = vs || sessionsList.find((x) => x.id === room.active_session_id) || null;
+  }
+
   async function refresh() {
     try {
       const [r, p, m, sl] = await Promise.all([api.getRoom(), api.getPolls(), api.getMessages(), api.getSessions()]);
       room = r; polls = p; messages = m; sessionsList = sl;
+      resolveScope();
       const items = activeItems();
       const cs = await Promise.all(items.map((t) => (t.type === "open" ? null : api.getCounts(t.id))));
       countsById = {};
@@ -264,7 +278,7 @@
 
   // everything live right now: one poll, or every question in the live group
   function liveItems() {
-    if (!room) return [];
+    if (!room || pinned) return [];  // a pinned non-active session has no live content
     if (room.active_group) {
       return polls
         .filter((p) => p.session_id === room.active_session_id && p.group_name === room.active_group)
@@ -277,8 +291,9 @@
   // "open anytime" polls: answerable with no presentation running
   function anytimeItems(excludeIds) {
     if (!room) return [];
+    const sid = scopeSession ? scopeSession.id : room.active_session_id;
     return polls
-      .filter((p) => p.session_id === room.active_session_id && p.async_open && !excludeIds.has(p.id))
+      .filter((p) => p.session_id === sid && p.async_open && !excludeIds.has(p.id))
       .sort((a, b) => a.position - b.position);
   }
 
@@ -300,8 +315,7 @@
   // ------- render -------
   let appliedTheme = null;
   function render() {
-    const sess = sessionsList.find((sn) => sn.id === room.active_session_id);
-    const th = (sess && sess.theme) || room.theme || "default";
+    const th = (scopeSession && scopeSession.theme) || room.theme || "default";
     if (th !== appliedTheme) { appliedTheme = th; window.PollRoom.applyTheme(th); }
     document.title = room.title || "PollRoom";
     $("room-title").textContent = room.title || "PollRoom";
@@ -313,7 +327,10 @@
     $("live-text").textContent = live.length ? "Live" : (anytime.length ? "Open" : "Waiting");
 
     const prog = $("poll-progress");
-    if (room.active_group) {
+    if (pinned) {
+      prog.hidden = false;
+      prog.textContent = scopeSession.name + " · open anytime";
+    } else if (room.active_group) {
       prog.hidden = false;
       prog.textContent = room.active_group + " · " + live.length + (live.length === 1 ? " question" : " questions");
     } else {
@@ -336,8 +353,8 @@
         area.innerHTML =
           '<div class="card waiting">' +
           '<div class="dot-row"><i></i><i></i><i></i></div>' +
-          '<div class="big">Hang tight</div>' +
-          "<p>The next poll will appear here the moment it goes live.</p>" +
+          '<div class="big">' + (pinned ? "Nothing open right now" : "Hang tight") + "</div>" +
+          "<p>" + (pinned ? "This session has no questions open at the moment." : "The next poll will appear here the moment it goes live.") + "</p>" +
           "</div>";
       }
       return;
@@ -602,7 +619,8 @@
   function renderChat() {
     const block = $("comments-block");
     const open = room.comments_open;
-    const roomMsgs = messages.filter((m) => !m.poll_id && !m.hidden && m.session_id === room.active_session_id);
+    const sid = scopeSession ? scopeSession.id : room.active_session_id;
+    const roomMsgs = messages.filter((m) => !m.poll_id && !m.hidden && m.session_id === sid);
     block.hidden = !open && !roomMsgs.length;
     if (block.hidden) return;
     $("chat-input").disabled = !open;
@@ -647,13 +665,13 @@
     if (focused && focused.id) { const again = $(focused.id); if (again) again.focus(); }
   }
 
-  async function submitMessage(input, err, pollId) {
+  async function submitMessage(input, err, pollId, sessionId) {
     if (typeof input === "string") { input = $(input); err = $(err); }
     const body = input.value.trim();
     if (!body) return;
     err.hidden = true;
     try {
-      const id = await api.postMessage(body, pollId);
+      const id = await api.postMessage(body, pollId, sessionId);
       if (pollId && id) {
         myMsgs[pollId] = (myMsgs[pollId] || []).concat(id);
         lsSet("pr_my_msgs", myMsgs);
@@ -665,7 +683,7 @@
     }
   }
 
-  $("chat-send").addEventListener("click", () => submitMessage("chat-input", "chat-err", null));
+  $("chat-send").addEventListener("click", () => submitMessage("chat-input", "chat-err", null, scopeSession && scopeSession.id));
   $("chat-input").addEventListener("keydown", (e) => { if (e.key === "Enter") $("chat-send").click(); });
 
   // show a counter as messages approach the 280-character cap

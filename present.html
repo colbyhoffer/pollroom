@@ -325,10 +325,12 @@
         <div class="panel-h"><h2>Session</h2><button class="btn sm" id="new-session">+ New</button></div>
         <select id="session-select" title="The audience sees the selected session"></select>
         <div class="row" style="margin-top:10px">
+          <button class="btn ghost sm" id="copy-session-link">Copy session link</button>
           <button class="btn ghost sm" id="rename-session">Rename</button>
           <button class="btn ghost sm" id="delete-session">Delete</button>
           <button class="btn danger sm" id="reset-session">Reset responses…</button>
         </div>
+        <p class="hint" style="margin:8px 0 0">The session link always opens this session — its open-anytime questions work even with nothing presented.</p>
         <div class="field" style="margin:14px 0 0"><label for="theme-select">Theme</label>
           <select id="theme-select" title="Restyles audience phones, this console, and the stage"></select>
         </div>
@@ -910,6 +912,17 @@
     if (!name) return;
     await api.renameSession(pass, room.active_session_id, name);
   }));
+  $("copy-session-link").addEventListener("click", async () => {
+    const cur = sessionsList.find((sn) => sn.id === room.active_session_id);
+    if (!cur) return;
+    const url = audienceUrl() + "?s=" + encodeURIComponent(cur.slug || cur.id);
+    try {
+      await navigator.clipboard.writeText(url);
+      $("copy-session-link").textContent = "Copied!";
+      setTimeout(() => { $("copy-session-link").textContent = "Copy session link"; }, 1500);
+    } catch (e) { prompt("Session link:", url); }
+  });
+
   $("reset-session").addEventListener("click", guard(async () => {
     const cur = sessionsList.find((sn) => sn.id === room.active_session_id);
     if (!cur) return;

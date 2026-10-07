@@ -26,6 +26,7 @@ create table if not exists room_secret (
 create table if not exists sessions (
   id         uuid primary key default gen_random_uuid(),
   name       text not null,
+  slug       text unique,                 -- stable per-session URL handle (?s=<slug>)
   theme      text not null default 'default',
   created_at timestamptz not null default now()
 );
@@ -92,7 +93,7 @@ do $$
 declare sid uuid;
 begin
   if not exists (select 1 from sessions) then
-    insert into sessions (name) values ('First session') returning id into sid;
+    insert into sessions (name, slug) values ('First session', 'first-session') returning id into sid;
     update room set active_session_id = sid where id = 1;
   end if;
 end $$;
@@ -177,10 +178,28 @@ begin
      and p.session_id = r.active_session_id then
     return;
   end if;
-  if p.async_open and p.session_id = r.active_session_id then
-    return;
+  if p.async_open then
+    return;  -- open-anytime polls are answerable from any session's URL
   end if;
   raise exception 'poll is not live';
+end $$;
+
+-- unique, url-safe handle derived from the session name at creation time
+create or replace function _session_slug(_name text, _self uuid) returns text
+language plpgsql security definer set search_path = public as $$
+declare
+  base text;
+  cand text;
+  n int := 1;
+begin
+  base := btrim(both '-' from lower(regexp_replace(coalesce(_name, ''), '[^a-zA-Z0-9]+', '-', 'g')));
+  if base = '' then base := 'session'; end if;
+  cand := base;
+  while exists (select 1 from sessions where slug = cand and (_self is null or id <> _self)) loop
+    n := n + 1;
+    cand := base || '-' || n;
+  end loop;
+  return cand;
 end $$;
 
 -- ---------- audience RPCs ----------
@@ -230,7 +249,7 @@ begin
     select _poll, _device, w from unnest(clean) w;
 end $$;
 
-create or replace function post_message(_device uuid, _body text, _poll uuid default null)
+create or replace function post_message(_device uuid, _body text, _poll uuid default null, _session uuid default null)
 returns uuid language plpgsql security definer set search_path = public as $$
 declare
   b text := btrim(_body);
@@ -245,7 +264,10 @@ begin
     if not (select comments_open from room where id = 1) then
       raise exception 'comments are closed';
     end if;
-    sid := (select active_session_id from room where id = 1);
+    if _session is not null and not exists (select 1 from sessions where id = _session) then
+      raise exception 'no such session';
+    end if;
+    sid := coalesce(_session, (select active_session_id from room where id = 1));
   else
     select * into p from polls where id = _poll;
     if p.id is null or p.type <> 'open' then raise exception 'invalid poll'; end if;
@@ -347,9 +369,10 @@ declare sid uuid;
 begin
   perform _require_admin(_pass);
   if btrim(coalesce(_name, '')) = '' then raise exception 'session name required'; end if;
-  insert into sessions (name, theme)
+  insert into sessions (name, theme, slug)
     values (btrim(_name),
-            coalesce((select theme from sessions where id = (select active_session_id from room where id = 1)), 'default'))
+            coalesce((select theme from sessions where id = (select active_session_id from room where id = 1)), 'default'),
+            _session_slug(_name, null))
     returning id into sid;
   update room set active_session_id = sid, active_poll_id = null, updated_at = now() where id = 1;
   return sid;

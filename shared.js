@@ -96,8 +96,19 @@
       s.sessions.forEach((sn) => { if (!sn.theme) sn.theme = s.room.theme || "default"; });
       lsSet(DEMO_KEY, s);
     }
+    if (s.sessions.some((sn) => !sn.slug)) {
+      s.sessions.forEach((sn) => { if (!sn.slug) sn.slug = demoSlug(sn.name, s); });
+      lsSet(DEMO_KEY, s);
+    }
     return s;
   }
+  function demoSlug(name, s) {
+    const base = (name || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "session";
+    let cand = base, n = 1;
+    while (s.sessions.some((x) => x.slug === cand)) { n += 1; cand = base + "-" + n; }
+    return cand;
+  }
+
   function demoSave(s) {
     lsSet(DEMO_KEY, s);
     changed(); // notify this tab; other tabs get the storage event
@@ -209,7 +220,7 @@
     };
     api.castVote = async (pollId, options) => { await rpc("cast_vote", { _poll: pollId, _device: deviceId, _options: options }); ping(); };
     api.submitWords = async (pollId, words) => { await rpc("submit_words", { _poll: pollId, _device: deviceId, _words: words }); ping(); };
-    api.postMessage = async (body, pollId) => { const id = await rpc("post_message", { _device: deviceId, _body: body, _poll: pollId || null }); ping(); return id; };
+    api.postMessage = async (body, pollId, sessionId) => { const id = await rpc("post_message", { _device: deviceId, _body: body, _poll: pollId || null, _session: sessionId || null }); ping(); return id; };
     api.toggleUpvote = async (messageId) => { const r = await rpc("toggle_upvote", { _message: messageId, _device: deviceId }); ping(); return r; };
     api.checkPass = async (pass) => rpc("check_admin", { _pass: pass });
     api.savePoll = async (pass, p) => { const id = await rpc("admin_save_poll", { _pass: pass, _id: p.id || null, _title: p.title, _type: p.type, _options: p.options || [], _allow_multiple: !!p.allow_multiple, _max_upvotes: p.max_upvotes == null ? 3 : p.max_upvotes, _subtitle: p.subtitle || null, _timer_seconds: p.timer_seconds || 0, _group_name: p.group_name || null, _max_words: p.max_words == null ? 3 : p.max_words, _async_open: !!p.async_open }); ping(); return id; };
@@ -235,7 +246,7 @@
       if (s.room.active_poll_id === pollId) return;
       const p = s.polls.find((x) => x.id === pollId);
       if (s.room.active_group && p && p.group_name === s.room.active_group && p.session_id === s.room.active_session_id) return;
-      if (p && p.async_open && p.session_id === s.room.active_session_id) return;
+      if (p && p.async_open) return;
       throw new Error("poll is not live");
     };
     api.getRoom = async () => demoLoad().room;
@@ -289,7 +300,7 @@
       words.slice(0, maxW).forEach((w) => s.words.push({ id: uuid(), poll_id: pollId, device_id: deviceId, word: w }));
       demoSave(s);
     };
-    api.postMessage = async (body, pollId) => {
+    api.postMessage = async (body, pollId, sessionId) => {
       const s = demoLoad();
       const b = body.trim();
       if (!b || b.length > 280) throw new Error("message must be 1-280 characters");
@@ -298,7 +309,7 @@
       const id = uuid();
       const sid = pollId
         ? (s.polls.find((p) => p.id === pollId) || {}).session_id
-        : s.room.active_session_id;
+        : (sessionId || s.room.active_session_id);
       s.messages.push({ id, poll_id: pollId || null, session_id: sid, device_id: deviceId, body: b, hidden: false, created_at: new Date().toISOString() });
       demoSave(s);
       return id;
@@ -384,7 +395,7 @@
       if (!name || !name.trim()) throw new Error("session name required");
       const cur = s.sessions.find((x) => x.id === s.room.active_session_id);
       const id = uuid();
-      s.sessions.push({ id, name: name.trim(), theme: (cur && cur.theme) || "default", created_at: new Date().toISOString() });
+      s.sessions.push({ id, name: name.trim(), slug: demoSlug(name, s), theme: (cur && cur.theme) || "default", created_at: new Date().toISOString() });
       s.room.active_session_id = id;
       s.room.active_poll_id = null;
       demoSave(s);
