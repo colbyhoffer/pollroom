@@ -238,6 +238,7 @@
     background: var(--card-2); border-radius: 999px; padding: clamp(6px, 1vh, 10px) clamp(14px, 1.6vw, 22px);
     font-variant-numeric: tabular-nums;
   }
+  #stage .stage-resp.revealed { border-color: var(--accent-edge); }
   #stage .stage-resp.top1 { background: var(--accent-faint); border-color: var(--accent); }
   #stage .stage-resp.top1 .rank { background: var(--accent); color: var(--accent-contrast); }
   #stage .stage-resp.top1 .rvotes { color: var(--accent); background: var(--accent-soft); }
@@ -634,15 +635,26 @@
     if (groupLive) {
       lastLiveKey = null;
       const members = sessionPolls().filter((p) => p.group_name === groupLive);
+      const openMembers = members.filter((p) => p.type === "open");
+      $("reveal-btn").hidden = !openMembers.length;
+      if (openMembers.length) {
+        $("reveal-btn").textContent = openMembers.some((p) => !p.revealed) ? "Reveal all" : "Hide all";
+      }
       body.innerHTML =
         '<p style="font-size:18px;font-weight:800;margin:0 0 4px">' + esc(groupLive) + "</p>" +
         '<p class="hint" style="margin:0 0 12px">Live as a set — the audience answers all ' + members.length +
-        " on one screen. To review results, go live on a single question below.</p>" +
+        " on one screen. Reveal sends a question's answers to their phones; for the big screen, go live on it below.</p>" +
         members.map((p) => {
           const n = respOf(p);
-          return '<div class="msg"><div class="body">' + esc(p.title) + '</div><div class="meta">' +
-            n + (n === 1 ? " response" : " responses") + "</div></div>";
+          const btn = p.type === "open"
+            ? '<button class="btn ghost sm grev" data-id="' + p.id + '" data-r="' + (p.revealed ? 0 : 1) + '">' + (p.revealed ? "Hide" : "Reveal") + "</button>"
+            : "";
+          return '<div class="msg"><div class="body">' + esc(p.title) + '<div class="meta" style="margin-top:2px">' +
+            n + (n === 1 ? " response" : " responses") + (p.revealed ? " · revealed" : "") + "</div></div>" + btn + "</div>";
         }).join("");
+      body.querySelectorAll(".grev").forEach((b) => {
+        b.addEventListener("click", guard(() => api.setRevealed(pass, b.dataset.id, b.dataset.r === "1")));
+      });
       return;
     }
     if (!poll) {
@@ -759,6 +771,12 @@
   }
 
   const toggleReveal = guard(() => {
+    if (room && room.active_group) {
+      const openMembers = sessionPolls().filter((p) => p.group_name === room.active_group && p.type === "open");
+      if (!openMembers.length) return Promise.resolve();
+      const anyHidden = openMembers.some((p) => !p.revealed);
+      return Promise.all(openMembers.map((p) => api.setRevealed(pass, p.id, anyHidden)));
+    }
     const p = activePoll();
     return p && p.type === "open" ? api.setRevealed(pass, p.id, !p.revealed) : Promise.resolve();
   });
@@ -1078,7 +1096,6 @@
     $("stage-next").disabled = !steps.length || sidx >= steps.length - 1;
     if (room.active_group) {
       const groupLive = room.active_group;
-      sr.hidden = true;
       $("stage-q").textContent = groupLive;
       $("stage-sub").hidden = false;
       $("stage-sub").textContent = "Answer every question on your phone — responses are anonymous";
@@ -1086,10 +1103,15 @@
       $("stage-join-foot").hidden = false;
       $("stage-count").textContent = "";
       const members = sessionPolls().filter((p) => p.group_name === groupLive);
+      const openMembers = members.filter((p) => p.type === "open");
+      sr.hidden = !openMembers.length;
+      if (openMembers.length) {
+        sr.textContent = openMembers.some((p) => !p.revealed) ? "Reveal all" : "Hide all";
+      }
       const content = $("stage-content");
       const gsig = members.map((p) => {
         const n = respOf(p);
-        return '<div class="stage-resp"><span class="rbody">' + esc(p.title) + '</span><span class="rvotes">' +
+        return '<div class="stage-resp' + (p.revealed ? " revealed" : "") + '"><span class="rbody">' + esc(p.title) + '</span><span class="rvotes">' +
           n + (n === 1 ? " answer" : " answers") + "</span></div>";
       }).join("") || '<div class="waiting-big">No questions in this group.</div>';
       if (content._sig !== gsig) { content._sig = gsig; content.innerHTML = '<div class="stage-resp-list">' + gsig + "</div>"; }
