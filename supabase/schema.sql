@@ -199,7 +199,7 @@ declare
   cand text;
   n int := 1;
 begin
-  base := btrim(both '-' from lower(regexp_replace(coalesce(_name, ''), '[^a-zA-Z0-9]+', '-', 'g')));
+  base := btrim(lower(regexp_replace(coalesce(_name, ''), '[^a-zA-Z0-9]+', '-', 'g')), '-');
   if base = '' then base := 'session'; end if;
   cand := base;
   while exists (select 1 from sessions where slug = cand and (_self is null or id <> _self)) loop
