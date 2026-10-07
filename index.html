@@ -348,7 +348,7 @@
 
     if (poll.type === "open") { renderOpenPoll(poll, box, qn, qtotal); return; }
 
-    const mode = poll.type + (voted ? ":results" : ":vote") + ":" + qn + ":" + poll.title + ":" + (poll.subtitle || "");
+    const mode = poll.type + (voted ? ":results" : ":vote") + ":" + qn + ":" + (poll.max_words || "") + ":" + poll.title + ":" + (poll.subtitle || "");
     if (box.dataset.mode !== mode) {
       box.dataset.mode = mode;
       if (poll.type === "choice") voted ? buildChoiceResults(poll, box, qn, qtotal) : buildChoiceVote(poll, box, qn, qtotal);
@@ -426,14 +426,16 @@
   function buildWordVote(poll, box, qn, qtotal) {
     const prev = myWords[poll.id] || [];
     const wid = "w-" + poll.id.slice(0, 8) + "-";
+    const maxW = Math.min(Math.max(poll.max_words == null ? 3 : poll.max_words, 1), 3);
+    const slots = Array.from({ length: maxW }, (_, i) => i);
     box.innerHTML =
       '<div class="card">' + cardHead(poll, qn, qtotal) +
-      '<p class="poll-meta">One word per box — they join the cloud on screen</p>' +
-      [0, 1, 2].map((i) =>
-        '<div class="wfield"><label for="' + wid + i + '">Word ' + (i + 1) + (i ? " · optional" : "") + "</label>" +
+      '<p class="poll-meta">' + (maxW === 1 ? "One word — it joins the cloud on screen" : "One word per box — they join the cloud on screen") + "</p>" +
+      slots.map((i) =>
+        '<div class="wfield"><label for="' + wid + i + '">' + (maxW === 1 ? "Your word" : "Word " + (i + 1) + (i ? " · optional" : "")) + "</label>" +
         '<input type="text" class="w-input" id="' + wid + i + '" maxlength="40" autocomplete="off" autocapitalize="none" value="' + esc(prev[i] || "") + '" placeholder="' + (i ? "Add another" : "e.g. energized") + '"></div>'
       ).join("") +
-      '<button class="btn words-btn">Add my words</button>' +
+      '<button class="btn words-btn">' + (maxW === 1 ? "Add my word" : "Add my words") + "</button>" +
       '<div class="err words-err" hidden></div>' +
       '<div class="mini-cloud" hidden>' +
       '<div class="mini-cloud-h">Live on the big screen</div>' +

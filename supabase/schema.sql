@@ -41,6 +41,7 @@ create table if not exists polls (
   allow_multiple boolean not null default false,
   revealed       boolean not null default false,  -- open polls: responses shown to audience?
   max_upvotes    int not null default 3,          -- per-person upvote cap on open polls; 0 = no limit
+  max_words      int not null default 3,          -- word clouds: words each person may submit (1-3)
   timer_seconds  int not null default 0,          -- facilitation countdown shown on stage; 0 = none
   timer_started_at timestamptz,                   -- stamped each time the poll goes live
   position       int not null default 0,
@@ -215,7 +216,7 @@ begin
   clean := array(
     select distinct btrim(w) from unnest(_words) w
     where btrim(w) <> '' and length(btrim(w)) <= 40
-    limit 3
+    limit least(greatest(coalesce(p.max_words, 3), 1), 3)
   );
   if coalesce(array_length(clean, 1), 0) = 0 then
     raise exception 'enter at least one word';
@@ -290,7 +291,7 @@ create or replace function admin_save_poll(
   _pass text, _id uuid, _title text, _type text,
   _options jsonb, _allow_multiple boolean, _max_upvotes int default 3,
   _subtitle text default null, _timer_seconds int default 0,
-  _group_name text default null
+  _group_name text default null, _max_words int default 3
 ) returns uuid language plpgsql security definer set search_path = public as $$
 declare
   new_id uuid;
@@ -298,6 +299,7 @@ declare
   sub text := nullif(btrim(coalesce(_subtitle, '')), '');
   tmr int := greatest(coalesce(_timer_seconds, 0), 0);
   grp text := nullif(btrim(coalesce(_group_name, '')), '');
+  wrd int := least(greatest(coalesce(_max_words, 3), 1), 3);
 begin
   perform _require_admin(_pass);
   if btrim(coalesce(_title, '')) = '' then raise exception 'title required'; end if;
@@ -306,8 +308,8 @@ begin
     raise exception 'choice polls need at least 2 options';
   end if;
   if _id is null then
-    insert into polls (title, subtitle, type, options, allow_multiple, max_upvotes, timer_seconds, group_name, position, session_id)
-      values (btrim(_title), sub, _type, coalesce(_options, '[]'), coalesce(_allow_multiple, false), lim, tmr, grp,
+    insert into polls (title, subtitle, type, options, allow_multiple, max_upvotes, timer_seconds, group_name, max_words, position, session_id)
+      values (btrim(_title), sub, _type, coalesce(_options, '[]'), coalesce(_allow_multiple, false), lim, tmr, grp, wrd,
               coalesce((select max(position) + 1 from polls), 0),
               (select active_session_id from room where id = 1))
       returning id into new_id;
@@ -319,7 +321,8 @@ begin
     allow_multiple = coalesce(_allow_multiple, false),
     max_upvotes = lim,
     timer_seconds = tmr,
-    group_name = grp
+    group_name = grp,
+    max_words = wrd
     where id = _id;
   return _id;
 end $$;
