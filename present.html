@@ -358,6 +358,7 @@
           <button class="btn ghost sm" id="ed-add-opt">+ Add option</button>
           <label class="toggle" style="margin-top:10px"><span class="switch"><input type="checkbox" id="ed-multi"><i></i></span> Allow multiple selections</label>
         </div>
+        <div class="field"><label class="toggle"><span class="switch"><input type="checkbox" id="ed-async"><i></i></span> Open anytime — answerable even when nothing is being presented</label></div>
         <div class="field" id="ed-words-field" hidden><label for="ed-maxwords">Words per person</label>
           <input type="text" id="ed-maxwords" inputmode="numeric" style="max-width:120px" placeholder="3" autocomplete="off">
           <p class="hint" style="margin:6px 0 0">1-3 — use 1 for a strict one-word answer</p>
@@ -593,7 +594,7 @@
       const live = room.active_poll_id === p.id;
       const kind = { choice: "Multiple choice", words: "Word cloud", open: "Open response" }[p.type];
       const n = respOf(p);
-      const meta = kind + " · " + (n ? n + (n === 1 ? " response" : " responses") : "no responses yet");
+      const meta = (p.async_open ? "Anytime · " : "") + kind + " · " + (n ? n + (n === 1 ? " response" : " responses") : "no responses yet");
       const side = live
         ? '<span class="tag live">Live</span>'
         : '<span class="tag swap">' + (n ? "Done" : "Ready") + '</span>' +
@@ -967,6 +968,7 @@
     $("ed-multi").checked = !!editing.allow_multiple;
     $("ed-upvotes").value = editing.max_upvotes == null ? "" : (editing.max_upvotes < 0 ? "off" : String(editing.max_upvotes));
     $("ed-maxwords").value = editing.max_words == null ? "" : String(editing.max_words);
+    $("ed-async").checked = !!editing.async_open;
     renderOptionInputs();
     typeChanged();
     $("ed-err").hidden = true;
@@ -1017,6 +1019,7 @@
       allow_multiple: $("ed-multi").checked,
       max_upvotes: upRaw === "" ? 3 : (/^(off|none|no)$/i.test(upRaw) ? -1 : Math.max(parseInt(upRaw, 10) || 0, 0)),
       max_words: (() => { const v = $("ed-maxwords").value.trim(); return v === "" ? 3 : Math.min(Math.max(parseInt(v, 10) || 3, 1), 3); })(),
+      async_open: $("ed-async").checked,
     };
     try {
       const id = await api.savePoll(pass, p);

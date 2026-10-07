@@ -263,7 +263,7 @@
   }
 
   // everything live right now: one poll, or every question in the live group
-  function activeItems() {
+  function liveItems() {
     if (!room) return [];
     if (room.active_group) {
       return polls
@@ -272,6 +272,20 @@
     }
     const p = activePoll();
     return p ? [p] : [];
+  }
+
+  // "open anytime" polls: answerable with no presentation running
+  function anytimeItems(excludeIds) {
+    if (!room) return [];
+    return polls
+      .filter((p) => p.session_id === room.active_session_id && p.async_open && !excludeIds.has(p.id))
+      .sort((a, b) => a.position - b.position);
+  }
+
+  function activeItems() {
+    const live = liveItems();
+    const ids = new Set(live.map((t) => t.id));
+    return live.concat(anytimeItems(ids));
   }
 
   function subHtml(poll) {
@@ -291,16 +305,17 @@
     if (th !== appliedTheme) { appliedTheme = th; window.PollRoom.applyTheme(th); }
     document.title = room.title || "PollRoom";
     $("room-title").textContent = room.title || "PollRoom";
-    const items = activeItems();
+    const live = liveItems();
+    const anytime = anytimeItems(new Set(live.map((t) => t.id)));
 
     const pill = $("live-pill");
-    pill.classList.toggle("idle", !items.length);
-    $("live-text").textContent = items.length ? "Live" : "Waiting";
+    pill.classList.toggle("idle", !live.length);
+    $("live-text").textContent = live.length ? "Live" : (anytime.length ? "Open" : "Waiting");
 
     const prog = $("poll-progress");
     if (room.active_group) {
       prog.hidden = false;
-      prog.textContent = room.active_group + " · " + items.length + (items.length === 1 ? " question" : " questions");
+      prog.textContent = room.active_group + " · " + live.length + (live.length === 1 ? " question" : " questions");
     } else {
       const poll = activePoll();
       const sp = polls.filter((p) => p.session_id === room.active_session_id).sort((a, b) => a.position - b.position);
@@ -309,13 +324,13 @@
       if (!prog.hidden) prog.textContent = "Poll " + (pi + 1) + " of " + sp.length;
     }
 
-    renderPollArea(items);
+    renderPollArea(live, anytime);
     renderChat();
   }
 
-  function renderPollArea(items) {
+  function renderPollArea(live, anytime) {
     const area = $("poll-area");
-    if (!items.length) {
+    if (!live.length && !anytime.length) {
       if (area.dataset.state !== "waiting") {
         area.dataset.state = "waiting";
         area.innerHTML =
@@ -328,13 +343,22 @@
       return;
     }
     area.dataset.state = "live";
-    const want = new Set(items.map((t) => t.id));
+    // desired sequence: live boxes, then a heading + the anytime boxes
+    const seq = live.map((t) => ({ key: t.id, poll: t, qn: live.length > 1 ? live.indexOf(t) + 1 : 0, qtotal: live.length }));
+    if (anytime.length && live.length) seq.push({ key: "__hdr" });
+    anytime.forEach((t) => seq.push({ key: t.id, poll: t, qn: 0, qtotal: 0 }));
+
+    const want = new Set(seq.map((s) => s.key));
     Array.from(area.children).forEach((ch) => { if (!want.has(ch.dataset.pid)) ch.remove(); });
-    items.forEach((t, i) => {
-      let box = area.querySelector('[data-pid="' + t.id + '"]');
-      if (!box) { box = document.createElement("div"); box.dataset.pid = t.id; }
+    seq.forEach((s, i) => {
+      let box = area.querySelector('[data-pid="' + s.key + '"]');
+      if (!box) {
+        box = document.createElement("div");
+        box.dataset.pid = s.key;
+        if (s.key === "__hdr") box.innerHTML = '<div class="section-h"><h2>Open anytime</h2></div>';
+      }
       if (area.children[i] !== box) area.insertBefore(box, area.children[i] || null);
-      renderPoll(t, box, items.length > 1 ? i + 1 : 0, items.length);
+      if (s.poll) renderPoll(s.poll, box, s.qn, s.qtotal);
     });
   }
 

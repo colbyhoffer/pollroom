@@ -212,7 +212,7 @@
     api.postMessage = async (body, pollId) => { const id = await rpc("post_message", { _device: deviceId, _body: body, _poll: pollId || null }); ping(); return id; };
     api.toggleUpvote = async (messageId) => { const r = await rpc("toggle_upvote", { _message: messageId, _device: deviceId }); ping(); return r; };
     api.checkPass = async (pass) => rpc("check_admin", { _pass: pass });
-    api.savePoll = async (pass, p) => { const id = await rpc("admin_save_poll", { _pass: pass, _id: p.id || null, _title: p.title, _type: p.type, _options: p.options || [], _allow_multiple: !!p.allow_multiple, _max_upvotes: p.max_upvotes == null ? 3 : p.max_upvotes, _subtitle: p.subtitle || null, _timer_seconds: p.timer_seconds || 0, _group_name: p.group_name || null, _max_words: p.max_words == null ? 3 : p.max_words }); ping(); return id; };
+    api.savePoll = async (pass, p) => { const id = await rpc("admin_save_poll", { _pass: pass, _id: p.id || null, _title: p.title, _type: p.type, _options: p.options || [], _allow_multiple: !!p.allow_multiple, _max_upvotes: p.max_upvotes == null ? 3 : p.max_upvotes, _subtitle: p.subtitle || null, _timer_seconds: p.timer_seconds || 0, _group_name: p.group_name || null, _max_words: p.max_words == null ? 3 : p.max_words, _async_open: !!p.async_open }); ping(); return id; };
     api.setActiveGroup = async (pass, group) => { await rpc("admin_set_active_group", { _pass: pass, _group: group }); ping(); };
     api.setRevealed = async (pass, id, revealed) => { await rpc("admin_set_revealed", { _pass: pass, _id: id, _revealed: revealed }); ping(); };
     api.deletePoll = async (pass, id) => { await rpc("admin_delete_poll", { _pass: pass, _id: id }); ping(); };
@@ -235,6 +235,7 @@
       if (s.room.active_poll_id === pollId) return;
       const p = s.polls.find((x) => x.id === pollId);
       if (s.room.active_group && p && p.group_name === s.room.active_group && p.session_id === s.room.active_session_id) return;
+      if (p && p.async_open && p.session_id === s.room.active_session_id) return;
       throw new Error("poll is not live");
     };
     api.getRoom = async () => demoLoad().room;
@@ -335,14 +336,15 @@
       const tmr = Math.max(p.timer_seconds || 0, 0);
       const grp = (p.group_name || "").trim() || null;
       const wrd = Math.min(Math.max(p.max_words == null ? 3 : p.max_words, 1), 3);
+      const asy = !!p.async_open;
       if (p.id) {
         const ex = s.polls.find((x) => x.id === p.id);
-        Object.assign(ex, { title: p.title.trim(), subtitle: sub, type: p.type, options: p.options || [], allow_multiple: !!p.allow_multiple, max_upvotes: lim, timer_seconds: tmr, group_name: grp, max_words: wrd });
+        Object.assign(ex, { title: p.title.trim(), subtitle: sub, type: p.type, options: p.options || [], allow_multiple: !!p.allow_multiple, max_upvotes: lim, timer_seconds: tmr, group_name: grp, max_words: wrd, async_open: asy });
         demoSave(s);
         return p.id;
       }
       const id = uuid();
-      s.polls.push({ id, title: p.title.trim(), subtitle: sub, type: p.type, options: p.options || [], allow_multiple: !!p.allow_multiple, revealed: false, max_upvotes: lim, timer_seconds: tmr, group_name: grp, max_words: wrd, position: s.polls.length, session_id: s.room.active_session_id });
+      s.polls.push({ id, title: p.title.trim(), subtitle: sub, type: p.type, options: p.options || [], allow_multiple: !!p.allow_multiple, revealed: false, max_upvotes: lim, timer_seconds: tmr, group_name: grp, max_words: wrd, async_open: asy, position: s.polls.length, session_id: s.room.active_session_id });
       demoSave(s);
       return id;
     };
