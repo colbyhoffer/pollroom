@@ -239,6 +239,17 @@
     font-variant-numeric: tabular-nums;
   }
   #stage .stage-resp.revealed { border-color: var(--accent-edge); }
+  #stage .gq { display: flex; flex-direction: column; }
+  #stage .gq-answers {
+    margin: 0.7vh 0 0.5vh clamp(18px, 2vw, 30px);
+    display: flex; flex-direction: column; gap: 0.6vh;
+  }
+  #stage .gq-ans {
+    display: flex; justify-content: space-between; gap: 18px;
+    font-size: clamp(14px, 1.5vw, 21px); font-weight: 600; color: var(--text-soft);
+  }
+  #stage .gq-ans .n { color: var(--muted); font-variant-numeric: tabular-nums; flex: none; }
+  #stage .gq-more { font-size: clamp(12px, 1.2vw, 16px); color: var(--muted); }
   #stage .stage-resp.top1 { background: var(--accent-faint); border-color: var(--accent); }
   #stage .stage-resp.top1 .rank { background: var(--accent); color: var(--accent-contrast); }
   #stage .stage-resp.top1 .rvotes { color: var(--accent); background: var(--accent-soft); }
@@ -1111,8 +1122,21 @@
       const content = $("stage-content");
       const gsig = members.map((p) => {
         const n = respOf(p);
-        return '<div class="stage-resp' + (p.revealed ? " revealed" : "") + '"><span class="rbody">' + esc(p.title) + '</span><span class="rvotes">' +
+        let html = '<div class="stage-resp' + (p.revealed ? " revealed" : "") + '"><span class="rbody">' + esc(p.title) + '</span><span class="rvotes">' +
           n + (n === 1 ? " answer" : " answers") + "</span></div>";
+        if (p.revealed && p.type === "open") {
+          const upsOff = (p.max_upvotes == null ? 3 : p.max_upvotes) < 0;
+          const resp = messages.filter((m) => m.poll_id === p.id && !m.hidden)
+            .sort((a, b) => b.upvotes - a.upvotes).slice(0, 3);
+          html += '<div class="gq-answers">' +
+            (resp.map((m) =>
+              '<div class="gq-ans"><span>' + esc(m.body) + "</span>" +
+              (upsOff ? "" : '<span class="n">▲ ' + m.upvotes + "</span>") + "</div>"
+            ).join("") || '<div class="gq-ans"><span style="color:var(--muted)">No answers yet</span></div>') +
+            (n > 3 ? '<div class="gq-more">+ ' + (n - 3) + " more — go live on this question to see them all</div>" : "") +
+            "</div>";
+        }
+        return '<div class="gq">' + html + "</div>";
       }).join("") || '<div class="waiting-big">No questions in this group.</div>';
       if (content._sig !== gsig) { content._sig = gsig; content.innerHTML = '<div class="stage-resp-list">' + gsig + "</div>"; }
       lastStageKey = "group:" + groupLive;
