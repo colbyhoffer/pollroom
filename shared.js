@@ -218,12 +218,17 @@
       if (error) fail(error);
       return data;
     };
-    api.castVote = async (pollId, options) => { await rpc("cast_vote", { _poll: pollId, _device: deviceId, _options: options }); ping(); };
+    api.castVote = async (pollId, options, other) => { await rpc("cast_vote", { _poll: pollId, _device: deviceId, _options: options, _other: other || null }); ping(); };
+    api.getOtherAnswers = async (pollId) => {
+      const { data, error } = await sb.from("other_answers").select("*").eq("poll_id", pollId).order("created_at");
+      if (error) fail(error);
+      return data;
+    };
     api.submitWords = async (pollId, words) => { await rpc("submit_words", { _poll: pollId, _device: deviceId, _words: words }); ping(); };
     api.postMessage = async (body, pollId, sessionId) => { const id = await rpc("post_message", { _device: deviceId, _body: body, _poll: pollId || null, _session: sessionId || null }); ping(); return id; };
     api.toggleUpvote = async (messageId) => { const r = await rpc("toggle_upvote", { _message: messageId, _device: deviceId }); ping(); return r; };
     api.checkPass = async (pass) => rpc("check_admin", { _pass: pass });
-    api.savePoll = async (pass, p) => { const id = await rpc("admin_save_poll", { _pass: pass, _id: p.id || null, _title: p.title, _type: p.type, _options: p.options || [], _allow_multiple: !!p.allow_multiple, _max_upvotes: p.max_upvotes == null ? 3 : p.max_upvotes, _subtitle: p.subtitle || null, _timer_seconds: p.timer_seconds || 0, _group_name: p.group_name || null, _max_words: p.max_words == null ? 3 : p.max_words, _async_open: !!p.async_open }); ping(); return id; };
+    api.savePoll = async (pass, p) => { const id = await rpc("admin_save_poll", { _pass: pass, _id: p.id || null, _title: p.title, _type: p.type, _options: p.options || [], _allow_multiple: !!p.allow_multiple, _max_upvotes: p.max_upvotes == null ? 3 : p.max_upvotes, _subtitle: p.subtitle || null, _timer_seconds: p.timer_seconds || 0, _group_name: p.group_name || null, _max_words: p.max_words == null ? 3 : p.max_words, _async_open: !!p.async_open, _allow_other: !!p.allow_other }); ping(); return id; };
     api.setActiveGroup = async (pass, group) => { await rpc("admin_set_active_group", { _pass: pass, _group: group }); ping(); };
     api.setRevealed = async (pass, id, revealed) => { await rpc("admin_set_revealed", { _pass: pass, _id: id, _revealed: revealed }); ping(); };
     api.deletePoll = async (pass, id) => { await rpc("admin_delete_poll", { _pass: pass, _id: id }); ping(); };
@@ -284,12 +289,25 @@
         .map((m) => ({ ...m, upvotes: s.upvotes.filter((u) => u.message_id === m.id).length }))
         .sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
     };
-    api.castVote = async (pollId, options) => {
+    api.castVote = async (pollId, options, other) => {
       const s = demoLoad();
       activeGuard(s, pollId);
+      const poll = s.polls.find((x) => x.id === pollId);
+      const oth = (other || "").trim();
+      if (options.includes(-1)) {
+        if (!poll || !poll.allow_other) throw new Error("invalid option");
+        if (!oth) throw new Error("tell us your Other answer");
+        if (oth.length > 60) throw new Error("Other answer must be 60 characters or fewer");
+      }
       s.votes = s.votes.filter((v) => !(v.poll_id === pollId && v.device_id === deviceId));
-      options.forEach((o) => s.votes.push({ id: uuid(), poll_id: pollId, device_id: deviceId, option_idx: o }));
+      options.forEach((o) => s.votes.push({ id: uuid(), poll_id: pollId, device_id: deviceId, option_idx: o, other_text: o === -1 ? oth : null, created_at: new Date().toISOString() }));
       demoSave(s);
+    };
+    api.getOtherAnswers = async (pollId) => {
+      const s = demoLoad();
+      return s.votes
+        .filter((v) => v.poll_id === pollId && v.option_idx === -1 && v.other_text)
+        .map((v) => ({ poll_id: pollId, other_text: v.other_text, created_at: v.created_at }));
     };
     api.submitWords = async (pollId, words) => {
       const s = demoLoad();
@@ -348,14 +366,15 @@
       const grp = (p.group_name || "").trim() || null;
       const wrd = Math.min(Math.max(p.max_words == null ? 3 : p.max_words, 1), 3);
       const asy = !!p.async_open;
+      const aot = !!p.allow_other;
       if (p.id) {
         const ex = s.polls.find((x) => x.id === p.id);
-        Object.assign(ex, { title: p.title.trim(), subtitle: sub, type: p.type, options: p.options || [], allow_multiple: !!p.allow_multiple, max_upvotes: lim, timer_seconds: tmr, group_name: grp, max_words: wrd, async_open: asy });
+        Object.assign(ex, { title: p.title.trim(), subtitle: sub, type: p.type, options: p.options || [], allow_multiple: !!p.allow_multiple, allow_other: aot, max_upvotes: lim, timer_seconds: tmr, group_name: grp, max_words: wrd, async_open: asy });
         demoSave(s);
         return p.id;
       }
       const id = uuid();
-      s.polls.push({ id, title: p.title.trim(), subtitle: sub, type: p.type, options: p.options || [], allow_multiple: !!p.allow_multiple, revealed: false, max_upvotes: lim, timer_seconds: tmr, group_name: grp, max_words: wrd, async_open: asy, position: s.polls.length, session_id: s.room.active_session_id });
+      s.polls.push({ id, title: p.title.trim(), subtitle: sub, type: p.type, options: p.options || [], allow_multiple: !!p.allow_multiple, allow_other: aot, revealed: false, max_upvotes: lim, timer_seconds: tmr, group_name: grp, max_words: wrd, async_open: asy, position: s.polls.length, session_id: s.room.active_session_id });
       demoSave(s);
       return id;
     };

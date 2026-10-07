@@ -148,6 +148,13 @@
   .respondents { color: var(--muted); font-size: 13px; margin-top: 12px; font-variant-numeric: tabular-nums; }
   .cloud { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: baseline; justify-content: center; padding: 12px 0; }
   .cloud span { font-weight: 800; line-height: 1.1; }
+  .other-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 12px; }
+  .other-chips span {
+    font-size: 12.5px; color: var(--text-soft); background: var(--card-2);
+    border: 1px solid var(--line); border-radius: 999px; padding: 4px 11px;
+  }
+  .other-chips .oc-label { background: none; border: none; color: var(--muted); padding: 4px 2px; }
+  #stage .other-chips span { font-size: clamp(13px, 1.4vw, 19px); padding: 6px 14px; }
 
   @keyframes msg-in { from { opacity: 0; transform: translateY(18px); } to { opacity: 1; transform: none; } }
   .msg.anim { animation: msg-in 0.55s cubic-bezier(0.22, 1, 0.36, 1) both; }
@@ -357,8 +364,13 @@
           </select></div>
         <div class="field" id="ed-options-field"><label>Options</label>
           <div id="ed-options"></div>
-          <button class="btn ghost sm" id="ed-add-opt">+ Add option</button>
+          <div class="row">
+            <button class="btn ghost sm" id="ed-add-opt">+ Add option</button>
+            <button class="btn ghost sm" id="ed-sort">Sort A–Z</button>
+          </div>
           <label class="toggle" style="margin-top:10px"><span class="switch"><input type="checkbox" id="ed-multi"><i></i></span> Allow multiple selections</label>
+          <label class="toggle" style="margin-top:8px"><span class="switch"><input type="checkbox" id="ed-other"><i></i></span> Include an "Other…" write-in option (always shown last)</label>
+          <p class="hint" style="margin:8px 0 0">Votes are stored by option position — settle the order before collecting votes.</p>
         </div>
         <div class="field"><label class="toggle"><span class="switch"><input type="checkbox" id="ed-async"><i></i></span> Open anytime — answerable even when nothing is being presented</label></div>
         <div class="field" id="ed-words-field" hidden><label for="ed-maxwords">Words per person</label>
@@ -461,7 +473,7 @@
 
   let pass = null;
   try { pass = sessionStorage.getItem("pr_pass"); } catch (e) {}
-  let room = null, polls = [], counts = null, messages = [], sessionsList = [], respMap = {};
+  let room = null, polls = [], counts = null, messages = [], sessionsList = [], respMap = {}, otherAnswers = [];
   let editing = null;          // poll object being edited, or {id:null,...}
   let selectedId = null;
   let staged = false;
@@ -498,6 +510,7 @@
       room = r; polls = p; messages = m; sessionsList = sl; respMap = rc;
       const active = activePoll();
       counts = active ? await api.getCounts(active.id) : null;
+      otherAnswers = active && active.type === "choice" && active.allow_other ? await api.getOtherAnswers(active.id) : [];
       render();
     } catch (e) { console.error("refresh failed", e); }
   }
@@ -728,18 +741,27 @@
     if (poll.type === "choice") {
       const byIdx = {};
       c.votes.forEach((v) => { byIdx[v.option_idx] = v.n; });
+      const hasOther = poll.allow_other || byIdx[-1];
+      const rows = poll.options.map((o, i) => ({ label: o, idx: i }));
+      if (hasOther) rows.push({ label: "Other", idx: -1 });
       const total = Object.values(byIdx).reduce((a, b) => a + b, 0);
       const max = Math.max(1, ...Object.values(byIdx));
-      el.innerHTML = '<div class="bars">' + poll.options.map((o, i) => {
-        const n = byIdx[i] || 0;
+      el.innerHTML = '<div class="bars">' + rows.map((r2, i) => {
+        const n = byIdx[r2.idx] || 0;
         const pct = total ? Math.round((n / total) * 100) : 0;
         return (
           '<div class="bar-row' + (n === max && n > 0 ? " winner" : "") + '">' +
-          '<div class="bar-label"><span>' + esc(o) + '</span><span class="pct">' + pct + "% · " + n + "</span></div>" +
+          '<div class="bar-label"><span>' + esc(r2.label) + '</span><span class="pct">' + pct + "% · " + n + "</span></div>" +
           '<div class="bar-track"><div class="bar-fill" style="width:' + (total ? Math.max(1, (n / max) * 100) : 0) + "%;background:" + COLORS[i % COLORS.length] + '"></div></div>' +
           "</div>"
         );
-      }).join("") + "</div>";
+      }).join("") + "</div>" +
+      (poll.allow_other && otherAnswers.length
+        ? '<div class="other-chips"><span class="oc-label">Other answers:</span>' +
+          otherAnswers.slice(0, 12).map((a) => "<span>" + esc(a.other_text) + "</span>").join("") +
+          (otherAnswers.length > 12 ? '<span class="oc-label">+ ' + (otherAnswers.length - 12) + " more</span>" : "") +
+          "</div>"
+        : "");
     } else if (poll.type === "words") {
       const sorted = c.words.slice().sort((a, b) => b.n - a.n).slice(0, 60);
       const max = Math.max(1, ...sorted.map((w) => w.n));
@@ -859,6 +881,11 @@
         const byIdx = {};
         c.votes.forEach((v) => { byIdx[v.option_idx] = v.n; });
         p.options.forEach((o, i) => rows.push(["choice", p.title, o, byIdx[i] || 0, "", ""]));
+        if (p.allow_other || byIdx[-1]) {
+          rows.push(["choice", p.title, "Other", byIdx[-1] || 0, "", ""]);
+          (await api.getOtherAnswers(p.id)).forEach((a) =>
+            rows.push(["other", p.title, a.other_text, "", a.created_at, ""]));
+        }
       } else if (p.type === "words") {
         const c = await api.getCounts(p.id);
         c.words.slice().sort((a, b) => b.n - a.n)
@@ -979,6 +1006,7 @@
     $("ed-timer").value = fmtTimer(editing.timer_seconds || 0);
     $("ed-type").value = editing.type;
     $("ed-multi").checked = !!editing.allow_multiple;
+    $("ed-other").checked = !!editing.allow_other;
     $("ed-upvotes").value = editing.max_upvotes == null ? "" : (editing.max_upvotes < 0 ? "off" : String(editing.max_upvotes));
     $("ed-maxwords").value = editing.max_words == null ? "" : String(editing.max_words);
     $("ed-async").checked = !!editing.async_open;
@@ -987,8 +1015,12 @@
     $("ed-err").hidden = true;
   }
   function renderOptionInputs() {
-    $("ed-options").innerHTML = (editing.options.length ? editing.options : ["", ""]).map((o, i) =>
+    if (!editing.options.length) editing.options = ["", ""];
+    const last = editing.options.length - 1;
+    $("ed-options").innerHTML = editing.options.map((o, i) =>
       '<div class="optrow"><input type="text" maxlength="120" data-i="' + i + '" value="' + esc(o) + '" placeholder="Option ' + (i + 1) + '">' +
+      '<button class="btn ghost sm" data-up="' + i + '" aria-label="Move up"' + (i === 0 ? " disabled" : "") + ">↑</button>" +
+      '<button class="btn ghost sm" data-dn="' + i + '" aria-label="Move down"' + (i === last ? " disabled" : "") + ">↓</button>" +
       '<button class="btn ghost sm" data-del="' + i + '" aria-label="Remove option">✕</button></div>'
     ).join("");
     $("ed-options").querySelectorAll("input").forEach((inp) => {
@@ -997,7 +1029,25 @@
     $("ed-options").querySelectorAll("[data-del]").forEach((b) => {
       b.addEventListener("click", () => { editing.options.splice(+b.dataset.del, 1); renderOptionInputs(); });
     });
+    $("ed-options").querySelectorAll("[data-up]").forEach((b) => {
+      b.addEventListener("click", () => {
+        const i = +b.dataset.up;
+        [editing.options[i - 1], editing.options[i]] = [editing.options[i], editing.options[i - 1]];
+        renderOptionInputs();
+      });
+    });
+    $("ed-options").querySelectorAll("[data-dn]").forEach((b) => {
+      b.addEventListener("click", () => {
+        const i = +b.dataset.dn;
+        [editing.options[i], editing.options[i + 1]] = [editing.options[i + 1], editing.options[i]];
+        renderOptionInputs();
+      });
+    });
   }
+  $("ed-sort").addEventListener("click", () => {
+    editing.options.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+    renderOptionInputs();
+  });
   function parseTimer(v) {
     v = (v || "").trim();
     if (!v) return 0;
@@ -1030,6 +1080,7 @@
       type: $("ed-type").value,
       options: $("ed-type").value === "choice" ? editing.options.map((o) => o.trim()).filter(Boolean) : [],
       allow_multiple: $("ed-multi").checked,
+      allow_other: $("ed-other").checked,
       max_upvotes: upRaw === "" ? 3 : (/^(off|none|no)$/i.test(upRaw) ? -1 : Math.max(parseInt(upRaw, 10) || 0, 0)),
       max_words: (() => { const v = $("ed-maxwords").value.trim(); return v === "" ? 3 : Math.min(Math.max(parseInt(v, 10) || 3, 1), 3); })(),
       async_open: $("ed-async").checked,

@@ -239,6 +239,7 @@
   let myWords = lsGet("pr_my_words", {});     // pollId -> [words]
   let myUps = lsGet("pr_my_upvotes", {});     // messageId -> true
   let myMsgs = lsGet("pr_my_msgs", {});       // pollId -> [messageId] (to show own responses pre-reveal)
+  let myOther = lsGet("pr_my_other", {});     // pollId -> my "Other" write-in text
 
   // ------- state -------
   let room = null, polls = [], countsById = {}, messages = [], sessionsList = [];
@@ -389,7 +390,7 @@
 
     if (poll.type === "open") { renderOpenPoll(poll, box, qn, qtotal); return; }
 
-    const mode = poll.type + (voted ? ":results" : ":vote") + ":" + qn + ":" + (poll.max_words || "") + ":" + poll.title + ":" + (poll.subtitle || "");
+    const mode = poll.type + (voted ? ":results" : ":vote") + ":" + qn + ":" + (poll.max_words || "") + ":" + (poll.allow_other ? "o" : "") + ":" + poll.title + ":" + (poll.subtitle || "");
     if (box.dataset.mode !== mode) {
       box.dataset.mode = mode;
       if (poll.type === "choice") voted ? buildChoiceResults(poll, box, qn, qtotal) : buildChoiceVote(poll, box, qn, qtotal);
@@ -403,20 +404,31 @@
   function buildChoiceVote(poll, box, qn, qtotal) {
     let pendingSel = (myVotes[poll.id] || []).slice();
     const multi = poll.allow_multiple;
+    const hasOther = !!poll.allow_other;
+    const oid = "of-" + poll.id.slice(0, 8);
+    const letter = (i) => (i < 26 ? String.fromCharCode(65 + i) : i + 1);
     box.innerHTML =
       '<div class="card">' + cardHead(poll, qn, qtotal) +
       '<p class="poll-meta">' + (multi ? "Select all that apply" : "Pick one") + "</p>" +
       '<div class="opts">' +
       poll.options.map((o, i) =>
         '<button class="opt' + (multi ? " multi" : "") + (pendingSel.includes(i) ? " sel" : "") + '" data-i="' + i + '">' +
-        '<span class="tick">' + (i < 26 ? String.fromCharCode(65 + i) : i + 1) + "</span><span>" + esc(o) + "</span></button>"
+        '<span class="tick">' + letter(i) + "</span><span>" + esc(o) + "</span></button>"
       ).join("") +
+      (hasOther
+        ? '<button class="opt' + (multi ? " multi" : "") + (pendingSel.includes(-1) ? " sel" : "") + '" data-i="-1">' +
+          '<span class="tick">' + letter(poll.options.length) + "</span><span>Other…</span></button>" +
+          '<div class="wfield other-fill"' + (pendingSel.includes(-1) ? "" : " hidden") + ' style="margin:2px 0 0">' +
+          '<label for="' + oid + '">Your answer</label>' +
+          '<input type="text" class="other-input" id="' + oid + '" maxlength="60" autocomplete="off" value="' + esc(myOther[poll.id] || "") + '" placeholder="Type a short answer"></div>'
+        : "") +
       "</div>" +
       '<button class="btn vote-btn"' + (pendingSel.length ? "" : " disabled") + ">Submit vote</button>" +
       '<div class="err vote-err" hidden></div>' +
       "</div>";
 
     const voteBtn = box.querySelector(".vote-btn");
+    const otherFill = box.querySelector(".other-fill");
     box.querySelectorAll(".opt").forEach((btn) => {
       btn.addEventListener("click", () => {
         const i = +btn.dataset.i;
@@ -428,20 +440,33 @@
         box.querySelectorAll(".opt").forEach((b) => {
           b.classList.toggle("sel", pendingSel.includes(+b.dataset.i));
         });
+        if (otherFill) {
+          const on = pendingSel.includes(-1);
+          otherFill.hidden = !on;
+          if (on && i === -1) box.querySelector(".other-input").focus();
+        }
         voteBtn.disabled = !pendingSel.length;
       });
     });
 
     voteBtn.addEventListener("click", async () => {
+      const err = box.querySelector(".vote-err");
+      const other = hasOther && pendingSel.includes(-1) ? box.querySelector(".other-input").value.trim() : "";
+      if (pendingSel.includes(-1) && !other) {
+        err.hidden = false; err.textContent = "Add your Other answer first.";
+        box.querySelector(".other-input").focus();
+        return;
+      }
       voteBtn.disabled = true; voteBtn.textContent = "Sending…";
       try {
-        await api.castVote(poll.id, pendingSel);
+        await api.castVote(poll.id, pendingSel, other);
         myVotes[poll.id] = pendingSel.slice(); lsSet("pr_my_votes", myVotes);
+        if (pendingSel.includes(-1)) { myOther[poll.id] = other; lsSet("pr_my_other", myOther); }
         viewingResults[poll.id] = true;
         refresh();
       } catch (e) {
         voteBtn.disabled = false; voteBtn.textContent = "Submit vote";
-        const el = box.querySelector(".vote-err"); el.hidden = false; el.textContent = e.message;
+        err.hidden = false; err.textContent = e.message;
       }
     });
   }
@@ -451,7 +476,9 @@
     box.innerHTML =
       '<div class="card">' + cardHead(poll, qn, qtotal) +
       '<p class="poll-meta">Live results — you voted' +
-      ((myVotes[poll.id] || []).length ? ": " + esc((myVotes[poll.id] || []).map((i) => poll.options[i]).join(", ")) : "") +
+      ((myVotes[poll.id] || []).length
+        ? ": " + esc((myVotes[poll.id] || []).map((i) => (i === -1 ? "Other" + (myOther[poll.id] ? " (" + myOther[poll.id] + ")" : "") : poll.options[i])).join(", "))
+        : "") +
       "</p>" +
       '<div class="bars res-bars"></div>' +
       '<div class="respondents res-n"></div>' +
@@ -542,14 +569,16 @@
       if (!bars) return;
       const byIdx = {};
       counts.votes.forEach((v) => { byIdx[v.option_idx] = v.n; });
+      const rows = poll.options.map((o, i) => ({ label: o, idx: i }));
+      if (poll.allow_other || byIdx[-1]) rows.push({ label: "Other", idx: -1 });
       const total = Object.values(byIdx).reduce((a, b) => a + b, 0);
       const max = Math.max(1, ...Object.values(byIdx));
-      bars.innerHTML = poll.options.map((o, i) => {
-        const n = byIdx[i] || 0;
+      bars.innerHTML = rows.map((r2, i) => {
+        const n = byIdx[r2.idx] || 0;
         const pct = total ? Math.round((n / total) * 100) : 0;
         return (
           '<div class="bar-row' + (n === max && n > 0 ? " winner" : "") + '">' +
-          '<div class="bar-label"><span>' + esc(o) + '</span><span class="pct">' + pct + "% · " + n + "</span></div>" +
+          '<div class="bar-label"><span>' + esc(r2.label) + '</span><span class="pct">' + pct + "% · " + n + "</span></div>" +
           '<div class="bar-track"><div class="bar-fill" style="width:' + (total ? Math.max(1, (n / max) * 100) : 0) + "%;background:" + COLORS[i % COLORS.length] + '"></div></div>' +
           "</div>"
         );
