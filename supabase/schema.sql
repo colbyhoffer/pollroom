@@ -268,6 +268,9 @@ begin
   end if;
   if m.poll_id is not null then
     select max_upvotes into lim from polls where id = m.poll_id;
+    if coalesce(lim, 0) < 0 then
+      raise exception 'upvoting is off for this poll';
+    end if;
     if coalesce(lim, 0) > 0 then
       select count(*) into used
       from upvotes u join messages mm on mm.id = u.message_id
@@ -291,7 +294,7 @@ create or replace function admin_save_poll(
 ) returns uuid language plpgsql security definer set search_path = public as $$
 declare
   new_id uuid;
-  lim int := greatest(coalesce(_max_upvotes, 3), 0);
+  lim int := greatest(coalesce(_max_upvotes, 3), -1);  -- -1 = upvoting off
   sub text := nullif(btrim(coalesce(_subtitle, '')), '');
   tmr int := greatest(coalesce(_timer_seconds, 0), 0);
   grp text := nullif(btrim(coalesce(_group_name, '')), '');

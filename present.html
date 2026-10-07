@@ -346,8 +346,8 @@
           <label class="toggle" style="margin-top:10px"><span class="switch"><input type="checkbox" id="ed-multi"><i></i></span> Allow multiple selections</label>
         </div>
         <div class="field" id="ed-upvotes-field" hidden><label for="ed-upvotes">Upvotes per person</label>
-          <input type="text" id="ed-upvotes" inputmode="numeric" style="max-width:120px" placeholder="3">
-          <p class="hint" style="margin:6px 0 0">How many responses each person can boost · 0 = no limit</p>
+          <input type="text" id="ed-upvotes" style="max-width:120px" placeholder="3" autocomplete="off">
+          <p class="hint" style="margin:6px 0 0">How many responses each person can boost · 0 = no limit · "off" = no upvoting</p>
         </div>
         <div class="field"><label for="ed-timer">Timer · optional</label>
           <input type="text" id="ed-timer" style="max-width:120px" placeholder="e.g. 1:30" autocomplete="off">
@@ -725,6 +725,7 @@
           " locked in — answer on your phone.</div>";
         return;
       }
+      const upsOff = (poll.max_upvotes == null ? 3 : poll.max_upvotes) < 0;
       if (stage) {
         // ranked big-screen list: top 5 numbered, leader highlighted, counts readable from the back
         const list = listAll.slice(0, 6);
@@ -734,7 +735,7 @@
           (anim ? ' style="animation-delay:' + i * 130 + 'ms"' : "") + ">" +
           (maxUp > 0 && i < 5 ? '<span class="rank">' + (i + 1) + "</span>" : "") +
           '<span class="rbody">' + esc(m.body) + "</span>" +
-          '<span class="rvotes">▲ ' + m.upvotes + "</span>" +
+          (upsOff ? "" : '<span class="rvotes">▲ ' + m.upvotes + "</span>") +
           "</div>";
         const sig = list.map((m, i) => row(m, false, i)).join("") || '<div class="hint">Waiting for responses…</div>';
         if (!animate && el._sig === sig) return;
@@ -748,7 +749,7 @@
         '<div class="msg' + (anim ? " anim" : "") + '"' +
         (anim ? ' style="animation-delay:' + i * 70 + 'ms"' : "") + ">" +
         '<div class="body">' + esc(m.body) + "</div>" +
-        '<div class="meta">▲ ' + m.upvotes + "</div></div>";
+        (upsOff ? "" : '<div class="meta">▲ ' + m.upvotes + "</div>") + "</div>";
       // Skip identical re-renders so the reveal cascade isn't wiped mid-flight
       const sig = list.map((m) => row(m, false, 0)).join("") || '<div class="hint">Waiting for responses…</div>';
       if (!animate && el._sig === sig) return;
@@ -912,7 +913,7 @@
     $("ed-timer").value = fmtTimer(editing.timer_seconds || 0);
     $("ed-type").value = editing.type;
     $("ed-multi").checked = !!editing.allow_multiple;
-    $("ed-upvotes").value = editing.max_upvotes == null ? "" : String(editing.max_upvotes);
+    $("ed-upvotes").value = editing.max_upvotes == null ? "" : (editing.max_upvotes < 0 ? "off" : String(editing.max_upvotes));
     renderOptionInputs();
     typeChanged();
     $("ed-err").hidden = true;
@@ -960,7 +961,7 @@
       type: $("ed-type").value,
       options: $("ed-type").value === "choice" ? editing.options.map((o) => o.trim()).filter(Boolean) : [],
       allow_multiple: $("ed-multi").checked,
-      max_upvotes: upRaw === "" ? 3 : Math.max(parseInt(upRaw, 10) || 0, 0),
+      max_upvotes: upRaw === "" ? 3 : (/^(off|none|no)$/i.test(upRaw) ? -1 : Math.max(parseInt(upRaw, 10) || 0, 0)),
     };
     try {
       const id = await api.savePoll(pass, p);
@@ -1026,14 +1027,36 @@
   $("stage-exit").addEventListener("click", exitStage);
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && staged && $("dlg").hidden) exitStage(); });
 
+  // Presentation steps: a question group is always one step; ungrouped
+  // polls are their own steps. Order follows the first poll of each group.
+  function stageSteps() {
+    const steps = [];
+    const seen = new Set();
+    sessionPolls().forEach((p) => {
+      if (p.group_name) {
+        if (!seen.has(p.group_name)) { seen.add(p.group_name); steps.push({ group: p.group_name }); }
+      } else {
+        steps.push({ poll: p });
+      }
+    });
+    return steps;
+  }
+  function stageStepIndex(steps) {
+    if (room && room.active_group) return steps.findIndex((s) => s.group === room.active_group);
+    const ap = activePoll();
+    if (!ap) return -1;
+    if (ap.group_name) return steps.findIndex((s) => s.group === ap.group_name);
+    return steps.findIndex((s) => s.poll && s.poll.id === ap.id);
+  }
   function stepPoll(dir) {
-    const list = sessionPolls();
-    if (!list.length) return Promise.resolve();
-    const idx = list.findIndex((p) => p.id === (room && room.active_poll_id));
+    const steps = stageSteps();
+    if (!steps.length) return Promise.resolve();
+    const idx = stageStepIndex(steps);
     if (dir < 0 && idx === 0) return api.setActive(pass, null); // back to the join screen
     const to = idx === -1 ? (dir > 0 ? 0 : -1) : idx + dir;
-    if (to < 0 || to >= list.length) return Promise.resolve();
-    return api.setActive(pass, list[to].id);
+    if (to < 0 || to >= steps.length) return Promise.resolve();
+    const s = steps[to];
+    return s.group ? api.setActiveGroup(pass, s.group) : api.setActive(pass, s.poll.id);
   }
   $("stage-next").addEventListener("click", guard(() => stepPoll(1)));
   $("stage-prev").addEventListener("click", guard(() => stepPoll(-1)));
@@ -1048,21 +1071,21 @@
     const sr = $("stage-reveal");
     sr.hidden = !poll || poll.type !== "open";
     if (poll && poll.type === "open") sr.textContent = poll.revealed ? "Hide responses" : "Reveal responses";
-    const navList = sessionPolls();
-    const idx = navList.findIndex((p) => p.id === (room && room.active_poll_id));
-    $("stage-prev").disabled = idx < 0;
-    $("stage-prev").title = idx === 0 ? "Back to join screen (←)" : "Previous poll (←)";
-    $("stage-next").disabled = !navList.length || idx >= navList.length - 1;
+    const steps = stageSteps();
+    const sidx = stageStepIndex(steps);
+    $("stage-prev").disabled = sidx < 0;
+    $("stage-prev").title = sidx === 0 ? "Back to join screen (←)" : "Previous (←)";
+    $("stage-next").disabled = !steps.length || sidx >= steps.length - 1;
     if (room.active_group) {
       const groupLive = room.active_group;
       sr.hidden = true;
       $("stage-q").textContent = groupLive;
       $("stage-sub").hidden = false;
       $("stage-sub").textContent = "Answer every question on your phone — responses are anonymous";
-      $("stage-progress").hidden = true;
+      renderStageProgress(steps, sidx);
       $("stage-join-foot").hidden = false;
       $("stage-count").textContent = "";
-      const members = navList.filter((p) => p.group_name === groupLive);
+      const members = sessionPolls().filter((p) => p.group_name === groupLive);
       const content = $("stage-content");
       const gsig = members.map((p) => {
         const n = respOf(p);
@@ -1102,17 +1125,7 @@
       return;
     }
     $("stage-join-foot").hidden = false;
-    const navList2 = sessionPolls();
-    const pi = navList2.findIndex((p2) => p2.id === poll.id);
-    const prog = $("stage-progress");
-    prog.hidden = pi < 0 || navList2.length < 2;
-    if (!prog.hidden) {
-      prog.innerHTML =
-        (navList2.length <= 10
-          ? '<div class="dots">' + navList2.map((_, i) => '<i class="' + (i === pi ? "on" : "") + '"></i>').join("") + "</div>"
-          : "") +
-        '<div class="plabel">Poll ' + (pi + 1) + " of " + navList2.length + "</div>";
-    }
+    renderStageProgress(steps, sidx);
     $("stage-q").textContent = poll.title;
     $("stage-sub").hidden = !poll.subtitle;
     $("stage-sub").textContent = poll.subtitle || "";
@@ -1141,6 +1154,17 @@
     }
   }
   setInterval(updateStageTimer, 250);
+
+  function renderStageProgress(steps, sidx) {
+    const prog = $("stage-progress");
+    prog.hidden = sidx < 0 || steps.length < 2;
+    if (prog.hidden) return;
+    prog.innerHTML =
+      (steps.length <= 10
+        ? '<div class="dots">' + steps.map((_, i) => '<i class="' + (i === sidx ? "on" : "") + '"></i>').join("") + "</div>"
+        : "") +
+      '<div class="plabel">' + (sidx + 1) + " of " + steps.length + "</div>";
+  }
 
   function updateJoined(n) {
     const pill = $("stage-joined");

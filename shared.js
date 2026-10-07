@@ -309,6 +309,7 @@
         if (msg && msg.poll_id) {
           const poll = s.polls.find((p) => p.id === msg.poll_id);
           const lim = poll ? (poll.max_upvotes == null ? 3 : poll.max_upvotes) : 0;
+          if (lim < 0) throw new Error("upvoting is off for this poll");
           if (lim > 0) {
             const pollMsgIds = new Set(s.messages.filter((m) => m.poll_id === msg.poll_id).map((m) => m.id));
             const used = s.upvotes.filter((u) => u.device_id === deviceId && pollMsgIds.has(u.message_id)).length;
@@ -326,7 +327,7 @@
       const s = demoLoad();
       if (!p.title || !p.title.trim()) throw new Error("title required");
       if (p.type === "choice" && (p.options || []).length < 2) throw new Error("choice polls need at least 2 options");
-      const lim = Math.max(p.max_upvotes == null ? 3 : p.max_upvotes, 0);
+      const lim = Math.max(p.max_upvotes == null ? 3 : p.max_upvotes, -1); // -1 = upvoting off
       const sub = (p.subtitle || "").trim() || null;
       const tmr = Math.max(p.timer_seconds || 0, 0);
       const grp = (p.group_name || "").trim() || null;

@@ -525,14 +525,15 @@
   // --- open poll: responses + upvotes (hidden until presenter reveals) ---
   function renderOpenPoll(poll, box, qn, qtotal) {
     const lim = poll.max_upvotes == null ? 3 : poll.max_upvotes;
-    const mode = "open:" + (poll.revealed ? "r" : "h") + ":" + qn + ":" + poll.title + ":" + (poll.subtitle || "");
+    const upsOff = lim < 0;
+    const mode = "open:" + (poll.revealed ? "r" : "h") + ":" + qn + ":" + lim + ":" + poll.title + ":" + (poll.subtitle || "");
     const rebuilt = box.dataset.mode !== mode;
     if (rebuilt) {
       box.dataset.mode = mode;
       box.innerHTML =
         '<div class="card">' + cardHead(poll, qn, qtotal) +
         '<p class="poll-meta">' + (poll.revealed
-          ? "Tap ▲ to boost answers you like" + (lim > 0 ? " (up to " + lim + ")" : "")
+          ? (upsOff ? "Responses from the room" : "Tap ▲ to boost answers you like" + (lim > 0 ? " (up to " + lim + ")" : ""))
           : "Reply below — responses stay hidden until the presenter reveals them") + "</p>" +
         '<div class="composer">' +
         '<input type="text" class="open-input" maxlength="280" placeholder="Type your response…">' +
@@ -558,7 +559,7 @@
     const note = box.querySelector(".open-note");
     if (poll.revealed) {
       note.hidden = true;
-      renderFeed(box.querySelector(".open-feed"), all, { errEl: box.querySelector(".open-err"), animate: rebuilt });
+      renderFeed(box.querySelector(".open-feed"), all, { errEl: box.querySelector(".open-err"), animate: rebuilt, upvotes: !upsOff });
     } else {
       const mine = new Set(myMsgs[poll.id] || []);
       const own = all.filter((m) => mine.has(m.id));
