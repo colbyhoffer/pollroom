@@ -1056,14 +1056,21 @@
   $("stage-exit").addEventListener("click", exitStage);
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && staged && $("dlg").hidden) exitStage(); });
 
-  // Presentation steps: a question group is always one step; ungrouped
-  // polls are their own steps. Order follows the first poll of each group.
+  // Presentation steps: each group is one entry step (everyone answers the
+  // whole set), followed by one review step per question in it — stepping
+  // onto a review page auto-reveals that question's answers. Ungrouped
+  // polls are their own steps. Order follows poll positions.
   function stageSteps() {
     const steps = [];
     const seen = new Set();
-    sessionPolls().forEach((p) => {
+    const sp = sessionPolls();
+    sp.forEach((p) => {
       if (p.group_name) {
-        if (!seen.has(p.group_name)) { seen.add(p.group_name); steps.push({ group: p.group_name }); }
+        if (!seen.has(p.group_name)) {
+          seen.add(p.group_name);
+          steps.push({ group: p.group_name });
+          sp.filter((q) => q.group_name === p.group_name).forEach((q) => steps.push({ poll: q, review: true }));
+        }
       } else {
         steps.push({ poll: p });
       }
@@ -1074,7 +1081,6 @@
     if (room && room.active_group) return steps.findIndex((s) => s.group === room.active_group);
     const ap = activePoll();
     if (!ap) return -1;
-    if (ap.group_name) return steps.findIndex((s) => s.group === ap.group_name);
     return steps.findIndex((s) => s.poll && s.poll.id === ap.id);
   }
   function stepPoll(dir) {
@@ -1085,7 +1091,11 @@
     const to = idx === -1 ? (dir > 0 ? 0 : -1) : idx + dir;
     if (to < 0 || to >= steps.length) return Promise.resolve();
     const s = steps[to];
-    return s.group ? api.setActiveGroup(pass, s.group) : api.setActive(pass, s.poll.id);
+    if (s.group) return api.setActiveGroup(pass, s.group);
+    if (s.review && s.poll.type === "open" && !s.poll.revealed) {
+      return api.setActive(pass, s.poll.id).then(() => api.setRevealed(pass, s.poll.id, true));
+    }
+    return api.setActive(pass, s.poll.id);
   }
   $("stage-next").addEventListener("click", guard(() => stepPoll(1)));
   $("stage-prev").addEventListener("click", guard(() => stepPoll(-1)));
