@@ -15,6 +15,7 @@ create table if not exists room (
   active_poll_id uuid,
   comments_open boolean not null default true,
   theme         text not null default 'default',
+  active_group  text,                             -- live question group (within the active session)
   updated_at    timestamptz not null default now()
 );
 
@@ -34,6 +35,7 @@ create table if not exists polls (
   session_id     uuid references sessions(id) on delete cascade,
   title          text not null,
   subtitle       text,
+  group_name     text,                            -- optional question group; a group goes live as one unit
   type           text not null check (type in ('choice','words','open')),
   options        jsonb not null default '[]',
   allow_multiple boolean not null default false,
@@ -161,10 +163,19 @@ end $$;
 
 create or replace function _require_active(_poll uuid) returns void
 language plpgsql security definer set search_path = public as $$
+declare
+  r room;
+  p polls;
 begin
-  if (select active_poll_id from room where id = 1) is distinct from _poll then
-    raise exception 'poll is not live';
+  select * into r from room where id = 1;
+  if r.active_poll_id = _poll then return; end if;
+  select * into p from polls where id = _poll;
+  if r.active_group is not null
+     and p.group_name = r.active_group
+     and p.session_id = r.active_session_id then
+    return;
   end if;
+  raise exception 'poll is not live';
 end $$;
 
 -- ---------- audience RPCs ----------
@@ -275,13 +286,15 @@ end $$;
 create or replace function admin_save_poll(
   _pass text, _id uuid, _title text, _type text,
   _options jsonb, _allow_multiple boolean, _max_upvotes int default 3,
-  _subtitle text default null, _timer_seconds int default 0
+  _subtitle text default null, _timer_seconds int default 0,
+  _group_name text default null
 ) returns uuid language plpgsql security definer set search_path = public as $$
 declare
   new_id uuid;
   lim int := greatest(coalesce(_max_upvotes, 3), 0);
   sub text := nullif(btrim(coalesce(_subtitle, '')), '');
   tmr int := greatest(coalesce(_timer_seconds, 0), 0);
+  grp text := nullif(btrim(coalesce(_group_name, '')), '');
 begin
   perform _require_admin(_pass);
   if btrim(coalesce(_title, '')) = '' then raise exception 'title required'; end if;
@@ -290,8 +303,8 @@ begin
     raise exception 'choice polls need at least 2 options';
   end if;
   if _id is null then
-    insert into polls (title, subtitle, type, options, allow_multiple, max_upvotes, timer_seconds, position, session_id)
-      values (btrim(_title), sub, _type, coalesce(_options, '[]'), coalesce(_allow_multiple, false), lim, tmr,
+    insert into polls (title, subtitle, type, options, allow_multiple, max_upvotes, timer_seconds, group_name, position, session_id)
+      values (btrim(_title), sub, _type, coalesce(_options, '[]'), coalesce(_allow_multiple, false), lim, tmr, grp,
               coalesce((select max(position) + 1 from polls), 0),
               (select active_session_id from room where id = 1))
       returning id into new_id;
@@ -302,7 +315,8 @@ begin
     options = coalesce(_options, '[]'),
     allow_multiple = coalesce(_allow_multiple, false),
     max_upvotes = lim,
-    timer_seconds = tmr
+    timer_seconds = tmr,
+    group_name = grp
     where id = _id;
   return _id;
 end $$;
@@ -383,10 +397,21 @@ create or replace function admin_set_active(_pass text, _poll uuid)
 returns void language plpgsql security definer set search_path = public as $$
 begin
   perform _require_admin(_pass);
-  update room set active_poll_id = _poll, updated_at = now() where id = 1;
+  update room set active_poll_id = _poll, active_group = null, updated_at = now() where id = 1;
   if _poll is not null then
     update polls set timer_started_at = now() where id = _poll;
   end if;
+end $$;
+
+create or replace function admin_set_active_group(_pass text, _group text)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  perform _require_admin(_pass);
+  update room set
+    active_group = nullif(btrim(coalesce(_group, '')), ''),
+    active_poll_id = null,
+    updated_at = now()
+    where id = 1;
 end $$;
 
 create or replace function admin_set_room(_pass text, _title text, _comments_open boolean, _theme text default null)

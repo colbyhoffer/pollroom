@@ -115,6 +115,16 @@
   .poll-item .golive { display: none; flex: none; }
   .poll-item:hover .golive, .poll-item.selected .golive { display: inline-block; }
   .poll-item:hover .tag.swap, .poll-item.selected .tag.swap { display: none; }
+  .group-head {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    margin: 14px 0 8px; padding-bottom: 4px;
+  }
+  .group-head:first-child { margin-top: 2px; }
+  .group-head .gname {
+    font-size: 12px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--text-soft);
+  }
+  .group-head .gname small { color: var(--muted); font-weight: 600; letter-spacing: normal; text-transform: none; }
   .tag {
     flex: none; font-size: 10.5px; font-weight: 800; letter-spacing: 0.07em; text-transform: uppercase;
     padding: 3px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted);
@@ -319,6 +329,11 @@
           <input type="text" id="ed-title" maxlength="200" placeholder="What should we ask the room?"></div>
         <div class="field"><label for="ed-subtitle">Subtitle · optional</label>
           <input type="text" id="ed-subtitle" maxlength="200" placeholder="e.g. One reason per response. Past tense."></div>
+        <div class="field"><label for="ed-group">Group · optional</label>
+          <input type="text" id="ed-group" maxlength="60" list="group-list" autocomplete="off" placeholder="e.g. Group 1">
+          <datalist id="group-list"></datalist>
+          <p class="hint" style="margin:6px 0 0">Questions sharing a group go live together — the audience answers them all on one screen.</p>
+        </div>
         <div class="field"><label for="ed-type">Type</label>
           <select id="ed-type">
             <option value="choice">Multiple choice</option>
@@ -553,13 +568,14 @@
     $("sees-pill").hidden = sessionsList.length < 2 || !curSess;
     if (curSess) $("sees-name").textContent = "Audience sees: " + curSess.name;
 
-    // poll list (current session only)
-    $("poll-list").innerHTML = sessionPolls().map((p) => {
+    // poll list (current session only), grouped questions under group headers
+    const sp = sessionPolls();
+    const groupOrder = [];
+    sp.forEach((p) => { if (p.group_name && !groupOrder.includes(p.group_name)) groupOrder.push(p.group_name); });
+    const pollRow = (p) => {
       const live = room.active_poll_id === p.id;
       const kind = { choice: "Multiple choice", words: "Word cloud", open: "Open response" }[p.type];
-      const n = p.type === "open"
-        ? messages.filter((m) => m.poll_id === p.id && !m.hidden).length
-        : (respMap[p.id] || 0);
+      const n = respOf(p);
       const meta = kind + " · " + (n ? n + (n === 1 ? " response" : " responses") : "no responses yet");
       const side = live
         ? '<span class="tag live">Live</span>'
@@ -571,12 +587,32 @@
         side +
         "</div>"
       );
-    }).join("") || '<div class="hint">No polls in this session yet — create one.</div>';
+    };
+    let listHtml = "";
+    groupOrder.forEach((g) => {
+      const members = sp.filter((p) => p.group_name === g);
+      const groupLive = room.active_group === g;
+      listHtml +=
+        '<div class="group-head">' +
+        '<span class="gname">' + esc(g) + ' <small>· ' + members.length + (members.length === 1 ? " question" : " questions") + "</small></span>" +
+        (groupLive
+          ? '<span class="tag live">Live</span>'
+          : '<button class="btn sm golive-group" data-group="' + esc(g) + '">Go live ▸</button>') +
+        "</div>" +
+        members.map(pollRow).join("");
+    });
+    const ungrouped = sp.filter((p) => !p.group_name);
+    if (groupOrder.length && ungrouped.length) listHtml += '<div class="group-head"><span class="gname">Ungrouped</span></div>';
+    listHtml += ungrouped.map(pollRow).join("");
+    $("poll-list").innerHTML = listHtml || '<div class="hint">No polls in this session yet — create one.</div>';
     document.querySelectorAll(".pi-main").forEach((el) => {
       el.addEventListener("click", () => { selectedId = el.dataset.id; openEditor(polls.find((p) => p.id === selectedId)); render(); });
     });
     document.querySelectorAll(".golive").forEach((el) => {
       el.addEventListener("click", guard(() => api.setActive(pass, el.dataset.go)));
+    });
+    document.querySelectorAll(".golive-group").forEach((el) => {
+      el.addEventListener("click", guard(() => api.setActiveGroup(pass, el.dataset.group)));
     });
 
     renderLive();
@@ -586,13 +622,29 @@
 
   function renderLive() {
     const poll = activePoll();
-    $("end-btn").hidden = !poll;
+    const groupLive = room.active_group;
+    $("end-btn").hidden = !poll && !groupLive;
+    $("end-btn").textContent = groupLive ? "End group" : "End poll";
     $("reset-btn").hidden = !poll;
     $("reveal-btn").hidden = !poll || poll.type !== "open";
     if (poll && poll.type === "open") {
       $("reveal-btn").textContent = poll.revealed ? "Hide responses" : "Reveal responses";
     }
     const body = $("live-body");
+    if (groupLive) {
+      lastLiveKey = null;
+      const members = sessionPolls().filter((p) => p.group_name === groupLive);
+      body.innerHTML =
+        '<p style="font-size:18px;font-weight:800;margin:0 0 4px">' + esc(groupLive) + "</p>" +
+        '<p class="hint" style="margin:0 0 12px">Live as a set — the audience answers all ' + members.length +
+        " on one screen. To review results, go live on a single question below.</p>" +
+        members.map((p) => {
+          const n = respOf(p);
+          return '<div class="msg"><div class="body">' + esc(p.title) + '</div><div class="meta">' +
+            n + (n === 1 ? " response" : " responses") + "</div></div>";
+        }).join("");
+      return;
+    }
     if (!poll) {
       lastLiveKey = null;
       const sel = sessionPolls().find((p) => p.id === selectedId);
@@ -627,6 +679,12 @@
   function respondentCount(poll, counts) {
     if (poll.type === "open") return messages.filter((m) => m.poll_id === poll.id && !m.hidden).length;
     return (counts && counts.respondents) || 0;
+  }
+
+  function respOf(p) {
+    return p.type === "open"
+      ? messages.filter((m) => m.poll_id === p.id && !m.hidden).length
+      : (respMap[p.id] || 0);
   }
 
   function renderResults(poll, counts, el, nEl, stage, animate) {
@@ -848,6 +906,9 @@
     $("ed-delete").hidden = !poll;
     $("ed-title").value = editing.title;
     $("ed-subtitle").value = editing.subtitle || "";
+    $("ed-group").value = editing.group_name || "";
+    $("group-list").innerHTML = [...new Set(sessionPolls().map((p) => p.group_name).filter(Boolean))]
+      .map((g) => '<option value="' + esc(g) + '"></option>').join("");
     $("ed-timer").value = fmtTimer(editing.timer_seconds || 0);
     $("ed-type").value = editing.type;
     $("ed-multi").checked = !!editing.allow_multiple;
@@ -894,6 +955,7 @@
       id: editing.id,
       title: $("ed-title").value,
       subtitle: $("ed-subtitle").value.trim(),
+      group_name: $("ed-group").value.trim(),
       timer_seconds: parseTimer($("ed-timer").value),
       type: $("ed-type").value,
       options: $("ed-type").value === "choice" ? editing.options.map((o) => o.trim()).filter(Boolean) : [],
@@ -937,10 +999,11 @@
   }
   $("present-btn").addEventListener("click", async () => {
     const poll = activePoll();
-    if (poll) {
+    const liveName = poll ? poll.title : room && room.active_group;
+    if (liveName) {
       const choice = await dlg({
         title: "Present",
-        message: '"' + poll.title + '" is live right now. Pick up where you left off, or start over from the join screen with responses hidden.',
+        message: '"' + liveName + '" is live right now. Pick up where you left off, or start over from the join screen with responses hidden.',
         okText: "Resume presentation",
         altText: "Start from beginning",
       });
@@ -990,6 +1053,26 @@
     $("stage-prev").disabled = idx < 0;
     $("stage-prev").title = idx === 0 ? "Back to join screen (←)" : "Previous poll (←)";
     $("stage-next").disabled = !navList.length || idx >= navList.length - 1;
+    if (room.active_group) {
+      const groupLive = room.active_group;
+      sr.hidden = true;
+      $("stage-q").textContent = groupLive;
+      $("stage-sub").hidden = false;
+      $("stage-sub").textContent = "Answer every question on your phone — responses are anonymous";
+      $("stage-progress").hidden = true;
+      $("stage-join-foot").hidden = false;
+      $("stage-count").textContent = "";
+      const members = navList.filter((p) => p.group_name === groupLive);
+      const content = $("stage-content");
+      const gsig = members.map((p) => {
+        const n = respOf(p);
+        return '<div class="stage-resp"><span class="rbody">' + esc(p.title) + '</span><span class="rvotes">' +
+          n + (n === 1 ? " answer" : " answers") + "</span></div>";
+      }).join("") || '<div class="waiting-big">No questions in this group.</div>';
+      if (content._sig !== gsig) { content._sig = gsig; content.innerHTML = '<div class="stage-resp-list">' + gsig + "</div>"; }
+      lastStageKey = "group:" + groupLive;
+      return;
+    }
     if (!poll) {
       $("stage-q").textContent = "";
       $("stage-sub").hidden = true;

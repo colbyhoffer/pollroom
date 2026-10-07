@@ -76,6 +76,7 @@
     border-radius: var(--radius); padding: 18px; margin-bottom: 16px;
   }
   .poll-q { font-size: 20px; font-weight: 800; letter-spacing: -0.01em; margin: 0 0 4px; text-wrap: balance; }
+  .qnum { font-size: 11px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); margin-bottom: 6px; }
   .poll-sub { font-size: 14px; font-weight: 600; color: var(--text-soft); margin: 0 0 4px; }
   .poll-meta { color: var(--muted); font-size: 13px; margin-bottom: 14px; }
 
@@ -240,17 +241,17 @@
   let myMsgs = lsGet("pr_my_msgs", {});       // pollId -> [messageId] (to show own responses pre-reveal)
 
   // ------- state -------
-  let room = null, polls = [], counts = null, messages = [], sessionsList = [];
-  let pendingSel = [];        // choice selection before submit
+  let room = null, polls = [], countsById = {}, messages = [], sessionsList = [];
   let viewingResults = {};    // pollId -> bool (voted, showing results)
-  let renderedPollId = null, renderedMode = null;
 
   async function refresh() {
     try {
       const [r, p, m, sl] = await Promise.all([api.getRoom(), api.getPolls(), api.getMessages(), api.getSessions()]);
       room = r; polls = p; messages = m; sessionsList = sl;
-      const active = activePoll();
-      counts = active ? await api.getCounts(active.id) : null;
+      const items = activeItems();
+      const cs = await Promise.all(items.map((t) => (t.type === "open" ? null : api.getCounts(t.id))));
+      countsById = {};
+      items.forEach((t, i) => { if (cs[i]) countsById[t.id] = cs[i]; });
       render();
     } catch (e) {
       console.error("refresh failed", e);
@@ -261,8 +262,25 @@
     return room && room.active_poll_id ? polls.find((p) => p.id === room.active_poll_id) : null;
   }
 
+  // everything live right now: one poll, or every question in the live group
+  function activeItems() {
+    if (!room) return [];
+    if (room.active_group) {
+      return polls
+        .filter((p) => p.session_id === room.active_session_id && p.group_name === room.active_group)
+        .sort((a, b) => a.position - b.position);
+    }
+    const p = activePoll();
+    return p ? [p] : [];
+  }
+
   function subHtml(poll) {
     return poll.subtitle ? '<p class="poll-sub">' + esc(poll.subtitle) + "</p>" : "";
+  }
+
+  function cardHead(poll, qn, qtotal) {
+    return (qn ? '<div class="qnum">Question ' + qn + " of " + qtotal + "</div>" : "") +
+      '<p class="poll-q">' + esc(poll.title) + "</p>" + subHtml(poll);
   }
 
   // ------- render -------
@@ -273,65 +291,79 @@
     if (th !== appliedTheme) { appliedTheme = th; window.PollRoom.applyTheme(th); }
     document.title = room.title || "PollRoom";
     $("room-title").textContent = room.title || "PollRoom";
-    const poll = activePoll();
+    const items = activeItems();
 
     const pill = $("live-pill");
-    pill.classList.toggle("idle", !poll);
-    $("live-text").textContent = poll ? "Live" : "Waiting";
+    pill.classList.toggle("idle", !items.length);
+    $("live-text").textContent = items.length ? "Live" : "Waiting";
 
     const prog = $("poll-progress");
-    const sp = polls.filter((p) => p.session_id === room.active_session_id).sort((a, b) => a.position - b.position);
-    const pi = poll ? sp.findIndex((p) => p.id === poll.id) : -1;
-    prog.hidden = pi < 0 || sp.length < 2;
-    if (!prog.hidden) prog.textContent = "Poll " + (pi + 1) + " of " + sp.length;
+    if (room.active_group) {
+      prog.hidden = false;
+      prog.textContent = room.active_group + " · " + items.length + (items.length === 1 ? " question" : " questions");
+    } else {
+      const poll = activePoll();
+      const sp = polls.filter((p) => p.session_id === room.active_session_id).sort((a, b) => a.position - b.position);
+      const pi = poll ? sp.findIndex((p) => p.id === poll.id) : -1;
+      prog.hidden = pi < 0 || sp.length < 2;
+      if (!prog.hidden) prog.textContent = "Poll " + (pi + 1) + " of " + sp.length;
+    }
 
-    renderPoll(poll);
+    renderPollArea(items);
     renderChat();
   }
 
-  function renderPoll(poll) {
+  function renderPollArea(items) {
     const area = $("poll-area");
-    if (!poll) {
-      if (renderedMode !== "waiting") {
+    if (!items.length) {
+      if (area.dataset.state !== "waiting") {
+        area.dataset.state = "waiting";
         area.innerHTML =
           '<div class="card waiting">' +
           '<div class="dot-row"><i></i><i></i><i></i></div>' +
           '<div class="big">Hang tight</div>' +
           "<p>The next poll will appear here the moment it goes live.</p>" +
           "</div>";
-        renderedMode = "waiting";
-        renderedPollId = null;
       }
       return;
     }
+    area.dataset.state = "live";
+    const want = new Set(items.map((t) => t.id));
+    Array.from(area.children).forEach((ch) => { if (!want.has(ch.dataset.pid)) ch.remove(); });
+    items.forEach((t, i) => {
+      let box = area.querySelector('[data-pid="' + t.id + '"]');
+      if (!box) { box = document.createElement("div"); box.dataset.pid = t.id; }
+      if (area.children[i] !== box) area.insertBefore(box, area.children[i] || null);
+      renderPoll(t, box, items.length > 1 ? i + 1 : 0, items.length);
+    });
+  }
 
+  function renderPoll(poll, box, qn, qtotal) {
     // viewingResults: true = show results, false = user chose "change my
     // vote" (don't fall back to vote history), undefined = infer from history
     const dismissed = viewingResults[poll.id] === false;
     const voted = !dismissed && (
       (poll.type === "choice" && (viewingResults[poll.id] || (myVotes[poll.id] || []).length)) ||
       (poll.type === "words" && (viewingResults[poll.id] || (myWords[poll.id] || []).length)));
-    const mode = poll.type + (voted ? ":results" : ":vote") + ":" + poll.title + ":" + (poll.subtitle || "");
 
-    if (poll.type === "open") { renderOpenPoll(poll, area); return; }
+    if (poll.type === "open") { renderOpenPoll(poll, box, qn, qtotal); return; }
 
-    if (renderedPollId !== poll.id || renderedMode !== mode) {
-      renderedPollId = poll.id;
-      renderedMode = mode;
-      if (poll.type === "choice") voted ? buildChoiceResults(poll, area) : buildChoiceVote(poll, area);
-      else voted ? buildWordResults(poll, area) : buildWordVote(poll, area);
+    const mode = poll.type + (voted ? ":results" : ":vote") + ":" + qn + ":" + poll.title + ":" + (poll.subtitle || "");
+    if (box.dataset.mode !== mode) {
+      box.dataset.mode = mode;
+      if (poll.type === "choice") voted ? buildChoiceResults(poll, box, qn, qtotal) : buildChoiceVote(poll, box, qn, qtotal);
+      else voted ? buildWordResults(poll, box, qn, qtotal) : buildWordVote(poll, box, qn, qtotal);
     }
-    if (voted) updateResults(poll);
-    else if (poll.type === "words") updateWordPreview();
+    if (voted) updateResults(poll, box);
+    else if (poll.type === "words") updateWordPreview(poll, box);
   }
 
   // --- choice: voting ---
-  function buildChoiceVote(poll, area) {
-    pendingSel = (myVotes[poll.id] || []).slice();
+  function buildChoiceVote(poll, box, qn, qtotal) {
+    let pendingSel = (myVotes[poll.id] || []).slice();
     const multi = poll.allow_multiple;
-    area.innerHTML =
-      '<div class="card">' +
-      '<p class="poll-q">' + esc(poll.title) + "</p>" + subHtml(poll) +
+    box.innerHTML =
+      '<div class="card">' + cardHead(poll, qn, qtotal) +
       '<p class="poll-meta">' + (multi ? "Select all that apply" : "Pick one") + "</p>" +
       '<div class="opts">' +
       poll.options.map((o, i) =>
@@ -339,11 +371,12 @@
         '<span class="tick">' + (i < 26 ? String.fromCharCode(65 + i) : i + 1) + "</span><span>" + esc(o) + "</span></button>"
       ).join("") +
       "</div>" +
-      '<button class="btn" id="vote-btn"' + (pendingSel.length ? "" : " disabled") + ">Submit vote</button>" +
-      '<div class="err" id="vote-err" hidden></div>' +
+      '<button class="btn vote-btn"' + (pendingSel.length ? "" : " disabled") + ">Submit vote</button>" +
+      '<div class="err vote-err" hidden></div>' +
       "</div>";
 
-    area.querySelectorAll(".opt").forEach((btn) => {
+    const voteBtn = box.querySelector(".vote-btn");
+    box.querySelectorAll(".opt").forEach((btn) => {
       btn.addEventListener("click", () => {
         const i = +btn.dataset.i;
         if (multi) {
@@ -351,89 +384,88 @@
         } else {
           pendingSel = [i];
         }
-        area.querySelectorAll(".opt").forEach((b) => {
+        box.querySelectorAll(".opt").forEach((b) => {
           b.classList.toggle("sel", pendingSel.includes(+b.dataset.i));
         });
-        $("vote-btn").disabled = !pendingSel.length;
+        voteBtn.disabled = !pendingSel.length;
       });
     });
 
-    $("vote-btn").addEventListener("click", async () => {
-      const btn = $("vote-btn");
-      btn.disabled = true; btn.textContent = "Sending…";
+    voteBtn.addEventListener("click", async () => {
+      voteBtn.disabled = true; voteBtn.textContent = "Sending…";
       try {
         await api.castVote(poll.id, pendingSel);
         myVotes[poll.id] = pendingSel.slice(); lsSet("pr_my_votes", myVotes);
         viewingResults[poll.id] = true;
         refresh();
       } catch (e) {
-        btn.disabled = false; btn.textContent = "Submit vote";
-        const el = $("vote-err"); el.hidden = false; el.textContent = e.message;
+        voteBtn.disabled = false; voteBtn.textContent = "Submit vote";
+        const el = box.querySelector(".vote-err"); el.hidden = false; el.textContent = e.message;
       }
     });
   }
 
   // --- choice: results ---
-  function buildChoiceResults(poll, area) {
-    area.innerHTML =
-      '<div class="card">' +
-      '<p class="poll-q">' + esc(poll.title) + "</p>" + subHtml(poll) +
+  function buildChoiceResults(poll, box, qn, qtotal) {
+    box.innerHTML =
+      '<div class="card">' + cardHead(poll, qn, qtotal) +
       '<p class="poll-meta">Live results — you voted' +
       ((myVotes[poll.id] || []).length ? ": " + esc((myVotes[poll.id] || []).map((i) => poll.options[i]).join(", ")) : "") +
       "</p>" +
-      '<div class="bars" id="res-bars"></div>' +
-      '<div class="respondents" id="res-n"></div>' +
-      '<button class="btn ghost" id="change-btn">Change my vote</button>' +
+      '<div class="bars res-bars"></div>' +
+      '<div class="respondents res-n"></div>' +
+      '<button class="btn ghost change-btn">Change my vote</button>' +
       "</div>";
-    $("change-btn").addEventListener("click", () => {
+    box.querySelector(".change-btn").addEventListener("click", () => {
       viewingResults[poll.id] = false;
-      renderedMode = null;
-      renderPoll(poll);
+      box.dataset.mode = "";
+      renderPoll(poll, box, qn, qtotal);
     });
   }
 
-  function buildWordVote(poll, area) {
+  function buildWordVote(poll, box, qn, qtotal) {
     const prev = myWords[poll.id] || [];
-    area.innerHTML =
-      '<div class="card">' +
-      '<p class="poll-q">' + esc(poll.title) + "</p>" + subHtml(poll) +
+    const wid = "w-" + poll.id.slice(0, 8) + "-";
+    box.innerHTML =
+      '<div class="card">' + cardHead(poll, qn, qtotal) +
       '<p class="poll-meta">One word per box — they join the cloud on screen</p>' +
       [0, 1, 2].map((i) =>
-        '<div class="wfield"><label for="word-' + i + '">Word ' + (i + 1) + (i ? " · optional" : "") + "</label>" +
-        '<input type="text" id="word-' + i + '" maxlength="40" autocomplete="off" autocapitalize="none" value="' + esc(prev[i] || "") + '" placeholder="' + (i ? "Add another" : "e.g. energized") + '"></div>'
+        '<div class="wfield"><label for="' + wid + i + '">Word ' + (i + 1) + (i ? " · optional" : "") + "</label>" +
+        '<input type="text" class="w-input" id="' + wid + i + '" maxlength="40" autocomplete="off" autocapitalize="none" value="' + esc(prev[i] || "") + '" placeholder="' + (i ? "Add another" : "e.g. energized") + '"></div>'
       ).join("") +
-      '<button class="btn" id="words-btn">Add my words</button>' +
-      '<div class="err" id="words-err" hidden></div>' +
-      '<div class="mini-cloud" id="mini-cloud" hidden>' +
+      '<button class="btn words-btn">Add my words</button>' +
+      '<div class="err words-err" hidden></div>' +
+      '<div class="mini-cloud" hidden>' +
       '<div class="mini-cloud-h">Live on the big screen</div>' +
-      '<div class="cloud" id="mini-cloud-words" style="padding:8px 0 2px"></div>' +
+      '<div class="cloud mini-cloud-words" style="padding:8px 0 2px"></div>' +
       "</div></div>";
-    $("words-btn").addEventListener("click", async () => {
-      const words = [0, 1, 2].map((i) => $("word-" + i).value.trim()).filter(Boolean);
+    const wordsBtn = box.querySelector(".words-btn");
+    wordsBtn.addEventListener("click", async () => {
+      const words = Array.from(box.querySelectorAll(".w-input")).map((inp) => inp.value.trim()).filter(Boolean);
       if (!words.length) return;
-      const btn = $("words-btn");
-      btn.disabled = true; btn.textContent = "Sending…";
+      wordsBtn.disabled = true; wordsBtn.textContent = "Sending…";
       try {
         await api.submitWords(poll.id, words);
         myWords[poll.id] = words; lsSet("pr_my_words", myWords);
         viewingResults[poll.id] = true;
         refresh();
       } catch (e) {
-        btn.disabled = false; btn.textContent = "Add my words";
-        const el = $("words-err"); el.hidden = false; el.textContent = e.message;
+        wordsBtn.disabled = false; wordsBtn.textContent = "Add my words";
+        const el = box.querySelector(".words-err"); el.hidden = false; el.textContent = e.message;
       }
     });
-    [0, 1, 2].forEach((i) => {
-      $("word-" + i).addEventListener("keydown", (e) => { if (e.key === "Enter") $("words-btn").click(); });
+    box.querySelectorAll(".w-input").forEach((inp) => {
+      inp.addEventListener("keydown", (e) => { if (e.key === "Enter") wordsBtn.click(); });
     });
-    updateWordPreview();
+    updateWordPreview(poll, box);
   }
 
-  function updateWordPreview() {
-    const box = $("mini-cloud"), el = $("mini-cloud-words");
-    if (!box || !el || !counts) return;
+  function updateWordPreview(poll, box) {
+    const wrap = box.querySelector(".mini-cloud"), el = box.querySelector(".mini-cloud-words");
+    const counts = countsById[poll.id];
+    if (!wrap || !el || !counts) return;
     const sorted = counts.words.slice().sort((a, b) => b.n - a.n).slice(0, 8);
-    box.hidden = !sorted.length;
+    wrap.hidden = !sorted.length;
     if (!sorted.length) return;
     const max = Math.max(1, ...sorted.map((w) => w.n));
     el.innerHTML = sorted.map((w, i) =>
@@ -441,29 +473,29 @@
     ).join("");
   }
 
-  function buildWordResults(poll, area) {
-    area.innerHTML =
-      '<div class="card">' +
-      '<p class="poll-q">' + esc(poll.title) + "</p>" + subHtml(poll) +
+  function buildWordResults(poll, box, qn, qtotal) {
+    box.innerHTML =
+      '<div class="card">' + cardHead(poll, qn, qtotal) +
       '<p class="poll-meta">Live word cloud</p>' +
-      '<div class="cloud" id="res-cloud"></div>' +
-      '<div class="respondents" id="res-n"></div>' +
-      '<button class="btn ghost" id="change-btn">Change my words</button>' +
+      '<div class="cloud res-cloud"></div>' +
+      '<div class="respondents res-n"></div>' +
+      '<button class="btn ghost change-btn">Change my words</button>' +
       "</div>";
-    $("change-btn").addEventListener("click", () => {
+    box.querySelector(".change-btn").addEventListener("click", () => {
       viewingResults[poll.id] = false;
-      renderedMode = null;
-      renderPoll(poll);
+      box.dataset.mode = "";
+      renderPoll(poll, box, qn, qtotal);
     });
   }
 
-  function updateResults(poll) {
+  function updateResults(poll, box) {
+    const counts = countsById[poll.id];
     if (!counts) return;
-    const nEl = $("res-n");
+    const nEl = box.querySelector(".res-n");
     if (nEl) nEl.textContent = counts.respondents + (counts.respondents === 1 ? " response" : " responses");
 
     if (poll.type === "choice") {
-      const bars = $("res-bars");
+      const bars = box.querySelector(".res-bars");
       if (!bars) return;
       const byIdx = {};
       counts.votes.forEach((v) => { byIdx[v.option_idx] = v.n; });
@@ -480,7 +512,7 @@
         );
       }).join("");
     } else if (poll.type === "words") {
-      const cloud = $("res-cloud");
+      const cloud = box.querySelector(".res-cloud");
       if (!cloud) return;
       const sorted = counts.words.slice().sort((a, b) => b.n - a.n).slice(0, 50);
       const max = Math.max(1, ...sorted.map((w) => w.n));
@@ -491,35 +523,42 @@
   }
 
   // --- open poll: responses + upvotes (hidden until presenter reveals) ---
-  function renderOpenPoll(poll, area) {
+  function renderOpenPoll(poll, box, qn, qtotal) {
     const lim = poll.max_upvotes == null ? 3 : poll.max_upvotes;
-    const mode = "open:" + poll.id + ":" + (poll.revealed ? "r" : "h") + ":" + poll.title + ":" + (poll.subtitle || "");
-    const rebuilt = renderedMode !== mode || renderedPollId !== poll.id;
+    const mode = "open:" + (poll.revealed ? "r" : "h") + ":" + qn + ":" + poll.title + ":" + (poll.subtitle || "");
+    const rebuilt = box.dataset.mode !== mode;
     if (rebuilt) {
-      renderedMode = mode; renderedPollId = poll.id;
-      area.innerHTML =
-        '<div class="card">' +
-        '<p class="poll-q">' + esc(poll.title) + "</p>" + subHtml(poll) +
+      box.dataset.mode = mode;
+      box.innerHTML =
+        '<div class="card">' + cardHead(poll, qn, qtotal) +
         '<p class="poll-meta">' + (poll.revealed
           ? "Tap ▲ to boost answers you like" + (lim > 0 ? " (up to " + lim + ")" : "")
           : "Reply below — responses stay hidden until the presenter reveals them") + "</p>" +
         '<div class="composer">' +
-        '<input type="text" id="open-input" maxlength="280" placeholder="Type your response…">' +
-        '<button class="btn" id="open-send">Send</button>' +
+        '<input type="text" class="open-input" maxlength="280" placeholder="Type your response…">' +
+        '<button class="btn open-send">Send</button>' +
         "</div>" +
-        '<div class="charcount" id="open-count" hidden></div>' +
-        '<div class="err" id="open-err" hidden></div>' +
-        '<div class="hint" id="open-note" style="padding-block:8px" hidden></div>' +
-        '<div id="open-feed"></div>' +
+        '<div class="charcount open-count" hidden></div>' +
+        '<div class="err open-err" hidden></div>' +
+        '<div class="hint open-note" style="padding-block:8px" hidden></div>' +
+        '<div class="open-feed"></div>' +
         "</div>";
-      $("open-send").addEventListener("click", () => submitMessage("open-input", "open-err", poll.id));
-      $("open-input").addEventListener("keydown", (e) => { if (e.key === "Enter") $("open-send").click(); });
+      const input = box.querySelector(".open-input");
+      const send = box.querySelector(".open-send");
+      const count = box.querySelector(".open-count");
+      send.addEventListener("click", () => submitMessage(input, box.querySelector(".open-err"), poll.id));
+      input.addEventListener("keydown", (e) => { if (e.key === "Enter") send.click(); });
+      input.addEventListener("input", () => {
+        const len = input.value.length;
+        count.hidden = len <= 200;
+        count.textContent = len + " / 280";
+      });
     }
     const all = messages.filter((m) => m.poll_id === poll.id && !m.hidden);
-    const note = $("open-note");
+    const note = box.querySelector(".open-note");
     if (poll.revealed) {
       note.hidden = true;
-      renderFeed($("open-feed"), all, { errId: "open-err", animate: rebuilt });
+      renderFeed(box.querySelector(".open-feed"), all, { errEl: box.querySelector(".open-err"), animate: rebuilt });
     } else {
       const mine = new Set(myMsgs[poll.id] || []);
       const own = all.filter((m) => mine.has(m.id));
@@ -528,7 +567,7 @@
         ? all.length + (all.length === 1 ? " response is" : " responses are") + " in, waiting for the reveal." +
           (own.length ? " Yours " + (own.length === 1 ? "is" : "are") + " below." : "")
         : "No responses yet — yours can be first.";
-      renderFeed($("open-feed"), own, { upvotes: false, empty: "" });
+      renderFeed(box.querySelector(".open-feed"), own, { upvotes: false, empty: "" });
     }
   }
 
@@ -542,7 +581,7 @@
     $("chat-input").disabled = !open;
     $("chat-send").disabled = !open;
     $("chat-input").placeholder = open ? "Say something to the room…" : "Chat is closed right now";
-    renderFeed($("chat-feed"), roomMsgs, { errId: "chat-err" });
+    renderFeed($("chat-feed"), roomMsgs, { errEl: $("chat-err") });
   }
 
   function renderFeed(el, list, opts) {
@@ -570,10 +609,10 @@
           const on = await api.toggleUpvote(btn.dataset.id);
           if (on) myUps[btn.dataset.id] = true; else delete myUps[btn.dataset.id];
           lsSet("pr_my_upvotes", myUps);
-          if (opts.errId) $(opts.errId).hidden = true;
+          if (opts.errEl) opts.errEl.hidden = true;
           refresh();
         } catch (e) {
-          if (opts.errId) { const errEl = $(opts.errId); errEl.hidden = false; errEl.textContent = e.message; }
+          if (opts.errEl) { opts.errEl.hidden = false; opts.errEl.textContent = e.message; }
           else console.error(e);
         }
       });
@@ -581,8 +620,8 @@
     if (focused && focused.id) { const again = $(focused.id); if (again) again.focus(); }
   }
 
-  async function submitMessage(inputId, errId, pollId) {
-    const input = $(inputId), err = $(errId);
+  async function submitMessage(input, err, pollId) {
+    if (typeof input === "string") { input = $(input); err = $(err); }
     const body = input.value.trim();
     if (!body) return;
     err.hidden = true;
@@ -613,16 +652,6 @@
     });
   }
   wireCounter("chat-input", "chat-count");
-  document.addEventListener("input", (e) => {
-    if (e.target && e.target.id === "open-input") {
-      const count = $("open-count");
-      if (count) {
-        const len = e.target.value.length;
-        count.hidden = len <= 200;
-        count.textContent = len + " / 280";
-      }
-    }
-  });
 
   api.onChange(refresh);
   if (api.trackPresence) api.trackPresence();
