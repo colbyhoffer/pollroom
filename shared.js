@@ -220,6 +220,7 @@
     api.setRoom = async (pass, { title, comments_open, theme }) => { await rpc("admin_set_room", { _pass: pass, _title: title ?? null, _comments_open: comments_open ?? null, _theme: theme ?? null }); ping(); };
     api.hideMessage = async (pass, id, hidden) => { await rpc("admin_hide_message", { _pass: pass, _id: id, _hidden: hidden }); ping(); };
     api.resetPoll = async (pass, id) => { await rpc("admin_reset_poll", { _pass: pass, _id: id }); ping(); };
+    api.resetSession = async (pass, id) => { await rpc("admin_reset_session", { _pass: pass, _id: id }); ping(); };
     api.trackPresence = () => { wantTrack = true; if (channelReady) pingChannel.track({ t: Date.now() }).catch(() => {}); };
     api.getPresenceCount = () => presenceCount;
     api.onPresence = (fn) => presenceCbs.push(fn);
@@ -461,6 +462,17 @@
       s.votes = s.votes.filter((v) => v.poll_id !== id);
       s.words = s.words.filter((w) => w.poll_id !== id);
       s.messages = s.messages.filter((m) => m.poll_id !== id);
+      demoSave(s);
+    };
+    api.resetSession = async (_pass, id) => {
+      const s = demoLoad();
+      const pollIds = new Set(s.polls.filter((p) => p.session_id === id).map((p) => p.id));
+      s.votes = s.votes.filter((v) => !pollIds.has(v.poll_id));
+      s.words = s.words.filter((w) => !pollIds.has(w.poll_id));
+      const deadMsgs = new Set(s.messages.filter((m) => m.session_id === id).map((m) => m.id));
+      s.messages = s.messages.filter((m) => m.session_id !== id);
+      s.upvotes = s.upvotes.filter((u) => !deadMsgs.has(u.message_id));
+      s.polls.forEach((p) => { if (p.session_id === id) { p.revealed = false; p.timer_started_at = null; } });
       demoSave(s);
     };
   }

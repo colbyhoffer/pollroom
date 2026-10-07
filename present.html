@@ -327,6 +327,7 @@
         <div class="row" style="margin-top:10px">
           <button class="btn ghost sm" id="rename-session">Rename</button>
           <button class="btn ghost sm" id="delete-session">Delete</button>
+          <button class="btn danger sm" id="reset-session">Reset responses…</button>
         </div>
         <div class="field" style="margin:14px 0 0"><label for="theme-select">Theme</label>
           <select id="theme-select" title="Restyles audience phones, this console, and the stage"></select>
@@ -908,6 +909,24 @@
     if (!name) return;
     await api.renameSession(pass, room.active_session_id, name);
   }));
+  $("reset-session").addEventListener("click", guard(async () => {
+    const cur = sessionsList.find((sn) => sn.id === room.active_session_id);
+    if (!cur) return;
+    const respTotal = sessionPolls().reduce((a, p) => a + respOf(p), 0);
+    const chat = sessionMessages().filter((m) => !m.poll_id).length;
+    const ok = await dlg({
+      title: '⚠ Reset all responses in "' + cur.name + '"?',
+      message: "Permanently wipes " + respTotal + " poll response" + (respTotal === 1 ? "" : "s") + " and " +
+        chat + " chat message" + (chat === 1 ? "" : "s") + " across every question in this session, and re-hides open answers. " +
+        "The questions themselves are kept. There is no undo — Export CSV first if you want to keep the data.",
+      okText: "Yes, reset everything",
+      danger: true,
+    });
+    if (!ok) return;
+    await api.resetSession(pass, cur.id);
+    toast('All responses in "' + cur.name + '" were reset.');
+  }));
+
   $("delete-session").addEventListener("click", guard(async () => {
     const cur = sessionsList.find((sn) => sn.id === room.active_session_id);
     if (!cur) return;
